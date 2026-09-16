@@ -45,11 +45,17 @@ def run(model: str, prompt: str, num_ctx: int) -> int:
     try:
         with urllib.request.urlopen(req, timeout=600) as r:
             out = json.load(r)
+    except urllib.error.HTTPError as e:
+        # Ollama answers 404 with a JSON body that says why - "model 'x' not found" is the
+        # daemon not seeing OLLAMA_MODELS, not a wrong URL. Print it.
+        body = e.read().decode("utf-8", "replace")[:300]
+        print(f"ollama: request failed ({e}): {body}", file=sys.stderr)
+        return 1
     except (urllib.error.URLError, OSError) as e:
         print(f"ollama: request failed ({e})", file=sys.stderr)
         return 1
-    sys.stdout.write(out.get("response", ""))
-    sys.stdout.write("\n")
+    # Bytes, not text: the Windows console may be cp950 and the model may answer with anything.
+    sys.stdout.buffer.write((out.get("response", "") + "\n").encode("utf-8", "replace"))
     return 0
 
 
