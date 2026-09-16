@@ -22,6 +22,11 @@ decision, it stays with the main model.
 | 2 | **Cheapest Claude subagent** — `cavecrew-investigator` (read-only locate), `cavecrew-builder` (1–2 file edit), `Explore`, or `Agent` with `model: haiku` / `sonnet` | needs to read across many files, follow references, or make a bounded edit; output compressed before it returns | low |
 | 3 | **Main model** | judgment, design, security, grading, anything that lands in a plan or register, code that ships | full |
 
+**The test for "delegate at all": big in, small out.** A subagent re-reads its instructions and
+the files, so a five-line lookup through one costs more than doing it inline. Delegate when the
+input is large and the answer is short (a list, a count, twelve lines out of two thousand); keep
+small precise lookups and every judgment in the main session.
+
 Rules that hold on every rung:
 
 - **Probe Ollama once per session**: `python ~/.claude/skills/token-economy-delegation/run.py --check`.
