@@ -16,7 +16,7 @@ import sys
 import urllib.error
 import urllib.request
 
-HOST = "http://localhost:11434"
+HOST = "http://127.0.0.1:11434"  # not localhost: on Windows that resolves to ::1, where a second daemon with no models may answer
 
 
 def check() -> int:
