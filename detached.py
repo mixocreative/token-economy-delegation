@@ -76,13 +76,25 @@ def _stalled(folder: Path, spec: dict) -> bool:
     return time.time() - quiet_since > float(spec.get("stall_minutes", DEFAULT_STALL_MINUTES)) * 60
 
 
+def _wrapper_pid(folder: Path, spec: dict) -> int:
+    recorded = folder / "wrapper.pid"
+    if recorded.exists():
+        try:
+            return int(recorded.read_text(encoding="utf-8").strip())
+        except ValueError:
+            pass
+    if time.time() - (folder / "command.json").stat().st_mtime < 15:   # the wrapper has not written its pid yet
+        return int(spec.get("pid", 0)) or os.getpid()
+    return int(spec.get("pid", 0))
+
+
 def start(name: str, command: list[str], max_hours: float = DEFAULT_MAX_HOURS,
           stall_minutes: float = DEFAULT_STALL_MINUTES) -> Path:
     folder = RUNS / name
     if (folder / "command.json").exists() and status_of(name)["state"] in ("running", "stalled"):
         raise SystemExit(f"{name} is already running")
     folder.mkdir(parents=True, exist_ok=True)
-    for stale in ("result.json", "output.log", "stop"):
+    for stale in ("result.json", "output.log", "stop", "wrapper.pid"):
         (folder / stale).unlink(missing_ok=True)
     flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW if os.name == "nt" else 0
     wrapper = subprocess.Popen(
@@ -108,7 +120,7 @@ def stop(name: str) -> dict:
         time.sleep(0.5)
     if status_of(name)["state"] in ("running", "stalled"):
         spec = json.loads((folder / "command.json").read_text(encoding="utf-8"))
-        _kill_tree(int(spec["pid"]))
+        _kill_tree(_wrapper_pid(folder, spec))
     return status_of(name)
 
 
@@ -119,6 +131,8 @@ def _wrap(name: str) -> int:
             break
         time.sleep(0.1)
     spec = json.loads((folder / "command.json").read_text(encoding="utf-8"))
+    # The pid the starter saw may be a launcher stub (venv / py.exe / Store alias) that exits at once; record our own.
+    (folder / "wrapper.pid").write_text(str(os.getpid()), encoding="utf-8")
     deadline = time.time() + float(spec.get("max_hours", DEFAULT_MAX_HOURS)) * 3600
     ended = "finished"
     with open(folder / "output.log", "wb") as log:
@@ -150,7 +164,7 @@ def status_of(name: str) -> dict:
     if (folder / "result.json").exists():
         result = json.loads((folder / "result.json").read_text(encoding="utf-8"))
         return {"name": name, "state": "done", **result}
-    state = "running" if _alive(int(spec.get("pid", 0))) else "died"
+    state = "running" if _alive(_wrapper_pid(folder, spec)) else "died"
     if state == "running" and _stalled(folder, spec):
         state = "stalled"                                   # alive but silent too long: look at it, maybe `stop` it
     return {"name": name, "state": state, "started_at": spec.get("started_at")}
