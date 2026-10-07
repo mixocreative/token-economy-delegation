@@ -1,6 +1,6 @@
 ---
 name: token-economy-delegation
-description: Use at the start of any task that would pull a large amount of text through the main context — reading big files, enumerating conditionals or parameters, listing call sites, tabulating or reformatting a long document, summarising logs, bulk searches — and whenever the user says "use ollama", "local model", "save tokens", "use a subagent", or asks whether a cheaper model can do a job. Applies in every Claude Code and Codex session.
+description: Use at the start of any task that would pull a large amount of text through the main context — reading big files, enumerating conditionals or parameters, listing call sites, tabulating or reformatting a long document, summarising logs, bulk searches — and whenever the user says "use ollama", "local model", "save tokens", "use a subagent", or asks whether a cheaper model can do a job. Also at the start of any long non-AI step (full test suite, build, installer or GPU walk, long download) and when a session may hit a usage/credit limit or be cut off: run it detached, record it in the handoff, and on resume read its result instead of re-running. Applies in every Claude Code and Codex session (one shared copy: S:\ai\skills\token-economy-delegation, linked from both ~/.claude/skills and ~/.codex/skills).
 ---
 
 # Delegation for token economy
@@ -18,8 +18,10 @@ decision, it stays with the main model.
 
 | Rung | Worker | Fits when | Cost |
 |---|---|---|---|
+| 0 | **No model at all: a detached process** (`detached.py`) | the step needs no judgment while it runs - test suite, build, smoke/walk scripts, installer or GPU runs, big downloads | free, and survives the session |
 | 1 | **Local Ollama** (`run.py`) | enumeration, extraction, reformatting, counting, first-pass summary of one input; output is verifiable mechanically | free |
 | 2 | **Cheapest Claude subagent** — `cavecrew-investigator` (read-only locate), `cavecrew-builder` (1–2 file edit), `Explore`, or `Agent` with `model: haiku` / `sonnet` | needs to read across many files, follow references, or make a bounded edit; output compressed before it returns | low |
+| 2b | **Codex CLI as an independent auditor** (`codex exec -s read-only -C <repo> -o reply.md - < prompt.md`) | a second opinion on a finished task: review/audit, plan consolidation, gap-finding; it reads the repo itself, so the main context only receives the verdict | separate quota |
 | 3 | **Main model** | judgment, design, security, grading, anything that lands in a plan or register, code that ships | full |
 
 **The test for "delegate at all": big in, small out.** A subagent re-reads its instructions and
@@ -41,6 +43,22 @@ Rules that hold on every rung:
 - **Say what was delegated and what was checked** in the reply. Delegation without a stated
   check is a rumour with a model name on it.
 - **Never delegate the decision.** Rung 1 and 2 return material; rung 3 decides.
+
+## Detached runs (rung 0) - long work that must survive a limit or a closed session
+
+Background commands of Claude Code / Codex die with the session and are never restored on resume. Anything long that needs no
+judgment while it runs is started as its own process instead:
+
+```bash
+python ~/.claude/skills/token-economy-delegation/detached.py start suite -- python -m pytest -q   # from the project root
+python ~/.claude/skills/token-economy-delegation/detached.py status        # running / done (exit code) / died
+python ~/.claude/skills/token-economy-delegation/detached.py tail suite 40
+```
+
+Rules: write the run NAME and what to do with its result into the project's handoff file and commit it before waiting; chain the
+whole close sequence (suite -> build -> smoke) in one script so it runs unattended; on resume read `status` and the log tail - never
+re-run a finished run; never shut down WSL/Docker/a test VM while a run depends on it; pace work so one heavy agent or run owns the
+machine at a time, and poll status rarely (each check costs tokens; waiting does not).
 
 ## Runner (rung 1)
 
