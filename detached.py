@@ -29,6 +29,7 @@ RUNS = Path(os.environ.get("RUNS_DIR") or os.environ.get("THREEDGEN_RUNS_DIR") o
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_NO_WINDOW = 0x08000000
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 
 def _now() -> str:
@@ -94,14 +95,20 @@ def start(name: str, command: list[str], max_hours: float = DEFAULT_MAX_HOURS,
     if (folder / "command.json").exists() and status_of(name)["state"] in ("running", "stalled"):
         raise SystemExit(f"{name} is already running")
     folder.mkdir(parents=True, exist_ok=True)
-    for stale in ("result.json", "output.log", "stop", "wrapper.pid"):
+    for stale in ("result.json", "output.log", "stop", "wrapper.pid", "reported"):
         (folder / stale).unlink(missing_ok=True)
     flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW if os.name == "nt" else 0
-    wrapper = subprocess.Popen(
-        [sys.executable, str(Path(__file__).resolve()), "_wrap", name],
-        cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        creationflags=flags, close_fds=True, start_new_session=os.name != "nt",
-    )
+    spawn = dict(cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                 close_fds=True, start_new_session=os.name != "nt",
+                 env={**os.environ, "PYTHONUNBUFFERED": "1"})          # a Python job's log grows as it goes
+    argv = [sys.executable, str(Path(__file__).resolve()), "_wrap", name]
+    try:
+        # The agent's shell puts what it starts in a Windows job that is killed when the command returns;
+        # breaking away from it is what lets the run outlive the call (and the session).
+        wrapper = subprocess.Popen(argv, creationflags=flags | (CREATE_BREAKAWAY_FROM_JOB if os.name == "nt" else 0),
+                                   **spawn)
+    except OSError:                                                      # the job forbids breakaway: best effort
+        wrapper = subprocess.Popen(argv, creationflags=flags, **spawn)
     (folder / "command.json").write_text(json.dumps(
         {"command": command, "cwd": str(ROOT), "started_at": _now(), "pid": wrapper.pid, "max_hours": max_hours,
          "stall_minutes": stall_minutes},
@@ -203,10 +210,17 @@ def main(argv: list[str]) -> int:
         interval = float(rest[0]) if rest else 60.0
         give_up = time.time() + (float(rest[1]) if len(rest) > 1 else 2.0) * 3600   # a watcher never lingers past 2 h
         seen: dict[str, str] = {}
+        first = True
         while time.time() < give_up:
             names = sorted(p.name for p in RUNS.glob("*") if p.is_dir()) if RUNS.exists() else []
             now = {name: status_of(name)["state"] for name in names}
             changed = [n for n, s in now.items() if seen.get(n) in ("running", "stalled") and s != seen.get(n)]
+            if first:      # a run that died or stalled before anyone watched is reported once, then marked
+                changed += [n for n, s in now.items() if s in ("died", "stalled") and not (RUNS / n / "reported").exists()]
+                first = False
+            for name in changed:
+                if now.get(name) in ("died", "stalled"):
+                    (RUNS / name / "reported").write_text(_now(), encoding="utf-8")
             if changed:
                 for name in changed:
                     print(json.dumps(status_of(name)))
