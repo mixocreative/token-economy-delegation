@@ -142,10 +142,21 @@ def _wrap(name: str) -> int:
     (folder / "wrapper.pid").write_text(str(os.getpid()), encoding="utf-8")
     deadline = time.time() + float(spec.get("max_hours", DEFAULT_MAX_HOURS)) * 3600
     ended = "finished"
+    command = list(spec["command"])
+    local = Path(spec["cwd"]) / command[0]
+    if not Path(command[0]).is_absolute() and local.exists():
+        command[0] = str(local)               # Windows resolves a relative program against the caller, not cwd=
     with open(folder / "output.log", "wb") as log:
-        child = subprocess.Popen(spec["command"], cwd=spec["cwd"], stdout=log, stderr=subprocess.STDOUT,
-                                 stdin=subprocess.DEVNULL, start_new_session=os.name != "nt",
-                                 creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0)   # never pop a console window
+        try:
+            child = subprocess.Popen(command, cwd=spec["cwd"], stdout=log, stderr=subprocess.STDOUT,
+                                     stdin=subprocess.DEVNULL, start_new_session=os.name != "nt",
+                                     creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0)  # never pop a console
+        except OSError as exc:                # say why in the log and the result instead of dying silently
+            log.write(f"could not start {command[0]}: {exc}\n".encode())
+            (folder / "result.json").write_text(json.dumps(
+                {"exit_code": -1, "ended": f"could not start: {exc}", "started_at": spec["started_at"],
+                 "finished_at": _now()}, indent=2), encoding="utf-8")
+            return -1
         while child.poll() is None:
             if (folder / "stop").exists():
                 ended = "stopped"
