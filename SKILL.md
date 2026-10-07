@@ -57,7 +57,9 @@ python ~/.claude/skills/token-economy-delegation/detached.py tail suite 40
 
 Rules: write the run NAME and what to do with its result into the project's handoff file and commit it before waiting; chain the
 whole close sequence (suite -> build -> smoke) in one script so it runs unattended; on resume read `status` and the log tail - never
-re-run a finished run; never shut down WSL/Docker/a test VM while a run depends on it; pace work so one heavy agent or run owns the
+re-run a finished run; arm `detached.py watch` as a background task so you wake only when a run ends, dies or
+stalls (alive but its log silent); every run has a hard time limit (`--max-hours`, default 6) that kills its whole process tree, `stop
+NAME` ends one at once, the watcher gives up after 2 h, nothing starts with Windows and a reboot ends all; never shut down WSL/Docker/a test VM while a run depends on it; pace work so one heavy agent or run owns the
 machine at a time, and poll status rarely (each check costs tokens; waiting does not).
 
 ## Runner (rung 1)
