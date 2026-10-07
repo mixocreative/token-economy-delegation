@@ -112,6 +112,21 @@ def main(argv: list[str]) -> int:
         for name in names:
             print(json.dumps(status_of(name)))
         return 0
+    if verb == "watch":
+        # Blocks (no output, no tokens) until a run that was running ends, or one appears and ends; then prints the changes.
+        # Start it as a background task of the agent: it wakes the agent only when something finishes or dies.
+        interval = float(rest[0]) if rest else 60.0
+        seen: dict[str, str] = {}
+        while True:
+            names = sorted(p.name for p in RUNS.glob("*") if p.is_dir()) if RUNS.exists() else []
+            now = {name: status_of(name)["state"] for name in names}
+            changed = [n for n, s in now.items() if seen.get(n) == "running" and s != "running"]
+            if changed:
+                for name in changed:
+                    print(json.dumps(status_of(name)))
+                return 0
+            seen = now
+            time.sleep(interval)
     if verb == "tail":
         lines = int(rest[1]) if len(rest) > 1 else 30
         log = RUNS / rest[0] / "output.log"
