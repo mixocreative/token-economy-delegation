@@ -21,7 +21,7 @@ decision, it stays with the main model.
 | 0 | **No model at all: a detached process** (`detached.py`) | the step needs no judgment while it runs - test suite, build, smoke/walk scripts, installer or GPU runs, big downloads | free, and survives the session |
 | 1 | **Local Ollama** (`run.py`) | enumeration, extraction, reformatting, counting, first-pass summary of one input; output is verifiable mechanically | free |
 | 2 | **Cheapest Claude subagent** — `cavecrew-investigator` (read-only locate), `cavecrew-builder` (1–2 file edit), `Explore`, or `Agent` with `model: haiku` / `sonnet` | needs to read across many files, follow references, or make a bounded edit; output compressed before it returns | low |
-| 2b | **Codex CLI as an independent auditor** (`codex exec -s read-only -C <repo> -o reply.md - < prompt.md`) | a second opinion on a finished task: review/audit, plan consolidation, gap-finding; it reads the repo itself, so the main context only receives the verdict | separate quota |
+| 2b | **Codex CLI as an independent auditor** (`python <skill>/codex_audit.py prompt.md reply.md (wraps codex exec read-only; prints CODEX FAILED with the reason - e.g. out of credit - so you fall back to a Claude reviewer)`) | a second opinion on a finished task: review/audit, plan consolidation, gap-finding; it reads the repo itself, so the main context only receives the verdict | separate quota |
 | 3 | **Main model** | judgment, design, security, grading, anything that lands in a plan or register, code that ships | full |
 
 **The test for "delegate at all": big in, small out.** A subagent re-reads its instructions and
