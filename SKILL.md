@@ -1,6 +1,6 @@
 ---
 name: token-economy-delegation
-description: Use at the start of any task that would pull a large amount of text through the main context — reading big files, enumerating conditionals or parameters, listing call sites, tabulating or reformatting a long document, summarising logs, bulk searches — and whenever the user says "use ollama", "local model", "save tokens", "use a subagent", or asks whether a cheaper model can do a job. Also at the start of any long non-AI step (full test suite, build, installer or GPU walk, long download) and when a session may hit a usage/credit limit or be cut off: run it detached, record it in the handoff, and on resume read its result instead of re-running. Applies in every Claude Code and Codex session (one shared copy: S:\ai\skills\token-economy-delegation, linked from both ~/.claude/skills and ~/.codex/skills).
+description: Use at the start of any task that would pull a large amount of text through the main context — reading big files, enumerating conditionals or parameters, listing call sites, repo-wide searches, tabulating or reformatting a long document, summarising logs, first-pass reviews, second opinions — and whenever the user says "use ollama", "local model", "use codex", "save tokens", "use a subagent", "cheaper model", or asks which model should do a job. Routes each job to the cheapest worker whose answer can be checked - no model, local Ollama (auto-discovered, verified, escalates on failure), Codex on its own quota, a Claude haiku/sonnet subagent, or the main model - and learns per-machine pass rates. Also for long non-AI steps (test suites, builds, GPU walks) that must survive a usage limit: run detached, read the result on resume. Applies in every Claude Code and Codex session (one shared copy: S:\ai\skills\token-economy-delegation, linked from both ~/.claude/skills and ~/.codex/skills).
 ---
 
 # Delegation for token economy
@@ -9,41 +9,132 @@ description: Use at the start of any task that would pull a large amount of text
 
 The main model's context is the scarce resource. Every bulky, mechanical step goes to the
 cheapest worker that can do it **without changing the quality of the result**, and the main
-session keeps the judgment: it verifies what came back and decides what it means. The test for
-"cheaper is fine" is one question — *would I accept this from a grep?* If a grep could produce
-it, a local model may. If it needs the codebase's meaning, the owner's rules, a grade or a
-decision, it stays with the main model.
+session keeps the judgment: it verifies what came back and decides what it means.
 
-## The ladder — try in this order, stop at the first that fits
+Two tests decide everything:
 
-| Rung | Worker | Fits when | Cost |
+1. **Big in, small out?** A handoff costs a prompt, a reply and a check. A five-line lookup is
+   cheaper inline. Delegate when the input is large and the answer is short.
+2. **Can the answer be checked?** Cheap and unverifiable is not cheap: it is a defect the main
+   model pays for later. *Would I accept this from a grep?* If a grep could produce it, a local
+   model may. If it needs the codebase's meaning, the owner's rules, a grade or a decision, it
+   stays with the main model.
+
+## Start here: ask the router (costs no model tokens)
+
+```bash
+python <skill>/route.py --status                               # what is usable now: Ollama models, Codex, Claude
+python <skill>/route.py --job list --files src/OrderPage.php   # who should do this job, the exact command, the fallback chain
+```
+
+Jobs: `long-run` `list` `extract` `count` `format` `classify` `summarize` `translate` `repo-read` `edit`
+`review` `second-opinion` `judgment`. The router reads live state - which Ollama models are installed and
+healthy, whether the input fits their context and the free VRAM, whether Codex is cooling down after a usage
+limit, and the **measured pass rate of each worker on this job type on this machine** (`~/.token-economy/ledger.jsonl`).
+A worker that keeps failing verification for a job type is skipped for it automatically.
+
+## The ladder
+
+| Rung | Worker | Fits when | Main-context cost |
 |---|---|---|---|
-| 0 | **No model at all: a detached process** (`detached.py`) | the step needs no judgment while it runs - test suite, build, smoke/walk scripts, installer or GPU runs, big downloads | free, and survives the session |
-| 1 | **Local Ollama** (`run.py`) | enumeration, extraction, reformatting, counting, first-pass summary of one input; output is verifiable mechanically | free |
-| 2 | **Cheapest Claude subagent** — `cavecrew-investigator` (read-only locate), `cavecrew-builder` (1–2 file edit), `Explore`, or `Agent` with `model: haiku` / `sonnet` | needs to read across many files, follow references, or make a bounded edit; output compressed before it returns | low |
-| 2a | **Local Ollama first-pass review** (`ollama_review.py RANGE out.md`, per changed file, only when the GPU and suites are idle) | EMERGENCY ONLY - when Codex is unavailable: a rough free list before a paid reviewer; noisy and slow (tested 2026-10-08: 1 real of 8, 44 s per file), never a verdict | free |
-| 2b | **Codex CLI as an independent auditor** (`python <skill>/codex_audit.py prompt.md reply.md (wraps codex exec read-only; prints CODEX FAILED with the reason - e.g. out of credit - so you fall back to a Claude reviewer)`) | a second opinion on a finished task: review/audit, plan consolidation, gap-finding; it reads the repo itself, so the main context only receives the verdict | separate quota |
+| 0 | **No model** — `detached.py` | test suite, build, smoke/walk scripts, installer or GPU runs, big downloads | ~0, survives the session |
+| 1 | **Local Ollama** — `run.py` (auto-routed) | one input, mechanical, **output checkable against the input**: enumerate, extract, count, reformat, classify, first-pass summary | prompt + verified answer |
+| 2 | **Codex** — `codex_run.py task` (effort low) | repo-wide reading with a short answer: callers, usages, "where is X handled"; Codex reads the files in its own context on its own quota | prompt + reply |
+| 2 | **Claude haiku / Explore subagent** | same as above when Codex is unavailable, or when Claude Code tools are needed | prompt + compressed reply |
+| 2 | **Claude sonnet subagent** | a bounded 1–2 file edit; a first-pass review | prompt + diff/reply |
+| 2b | **Codex audit** — `codex_run.py audit` (effort medium) | a second opinion on finished work: review, plan consolidation, gap-finding; returns a VERDICT | prompt + verdict |
 | 3 | **Main model** | judgment, design, security, grading, anything that lands in a plan or register, code that ships | full |
 
-**The test for "delegate at all": big in, small out.** A subagent re-reads its instructions and
-the files, so a five-line lookup through one costs more than doing it inline. Delegate when the
-input is large and the answer is short (a list, a count, twelve lines out of two thousand); keep
-small precise lookups and every judgment in the main session.
+**Escalation is the quality guarantee.** Each rung's answer is checked; a failed check moves the job up,
+and **the failed answer is discarded, never patched**: Ollama → Codex → Claude subagent → main. `run.py`
+exits 4 with `ESCALATE: <reason>`; `codex_run.py` exits 2 with `CODEX FAILED: <reason>`.
 
-Rules that hold on every rung:
+## Rung 1 — local Ollama, routed and verified (`run.py`)
 
-- **Probe Ollama once per session**: `python ~/.claude/skills/token-economy-delegation/run.py --check`.
-  Empty model list or `/api/generate` 404 = a stale daemon (seen 2026-09-16: tray app 0.21.0,
-  CLI 0.34.0, `OLLAMA_MODELS=S:\ai\ollama_models` unseen by the daemon). Tell the owner to quit
-  and restart the Ollama tray app; do not kill it. Skip to rung 2.
-- **Verify before use.** A count from a local model is checked against `grep -c`; a list is
-  spot-read (ten per cent); a summary is checked against the source on the two facts that
-  matter. A result that fails the check is discarded, not corrected.
-- **One artefact per call.** Enumerate A; enumerate B; diff locally. Never "read these three
-  files and tell me what is wrong".
-- **Say what was delegated and what was checked** in the reply. Delegation without a stated
-  check is a rumour with a model name on it.
-- **Never delegate the decision.** Rung 1 and 2 return material; rung 3 decides.
+```bash
+python <skill>/run.py --discover                 # models on every daemon: health, context, caps, VRAM fit, speed, routing preview
+python <skill>/run.py --bench all                # measure tok/s on this machine once (GPU idle), improves routing
+cat file.php | python <skill>/run.py --task list --number-lines \
+  --prompt "List every conditional that adds or removes an HTML section."
+cat app.log  | python <skill>/run.py --task count --count-regex "ERROR" --prompt "How many ERROR lines?"
+python <skill>/run.py --stats                    # pass rate and tokens offloaded per model x task
+```
+
+What `run.py` does so delegation does not cost quality:
+
+1. **Discovers, never assumes.** Model names are read live from every daemon (`OLLAMA_HOSTS`, default
+   `[::1]:11434, 127.0.0.1:11434, 127.0.0.1:11435`). Broken models (`/api/show` 404), embedding models and
+   models whose context the input would overflow are excluded. Never hard-code a model name in a prompt
+   or handoff: the set changes (2026-10-12 it was four models on Windows and four different ones in WSL).
+2. **Routes** by task fit (code → devstral / coder / qwen; prose → gemma / qwen; zh → qwen), measured pass
+   rate here, already-loaded (a cold 15–18 GB load costs 15–60 s), VRAM fit (never evict a GPU job), speed.
+   Override the family table in `routing.json`; pin with `--model NAME`.
+3. **Runs deterministically**: temperature 0, thinking off for mechanical tasks, think-blocks stripped,
+   context sized from the input, JSON schema enforced when `--schema` is given. An answer cut at the token
+   limit is `TRUNCATED` and rejected.
+4. **Verifies against the input**: `quotes` - every cited line must exist verbatim (with `--number-lines`,
+   at that line number); `count` - must equal the regex count; `json` - must parse and carry the schema's
+   required keys. `--agree` additionally requires two different models to agree (output = intersection).
+5. **Escalates**: tries the next candidate, then exits 4. Every attempt goes to the ledger, so the router
+   learns. Infrastructure errors (daemon closed the connection) are logged but do not count against a model.
+
+Choosing `--task`: `list` / `extract` (quotes), `count` (count), `classify` (json), `format`, `summarize`,
+`translate`, `review` (a first-pass defect list - every cited line must exist; still never a verdict).
+
+## Rung 2 — Codex on its own quota (`codex_run.py`)
+
+```bash
+python <skill>/codex_run.py --status                                   # usable / cooling down until HH:MM / not installed
+python <skill>/codex_run.py task  prompt.md reply.md --effort low      # repo-read: from the repo root
+python <skill>/codex_run.py audit prompt.md reply.md --effort medium   # second opinion: reply must carry VERDICT
+```
+
+- Read-only sandbox, always. Run from the repository Codex should read. Launch it through `detached.py` when the
+  calling shell may time out - a killed parent kills the Codex child mid-answer.
+- **Per-call overhead is large**: 40–125k Codex tokens per call whatever the question (measured 2026-10-12, even
+  with the preamble that stops it loading skills). Codex is for big reads with short answers; the router skips it
+  for inputs under ~20k tokens.
+- **Model by tier, from Codex's own list** (`~/.codex/models_cache.json`, tiered by the vendor's description):
+  `task` → cheap (e.g. gpt-6-luna), `audit` → mid (sol), `--tier top` (astra) only for a hard review. A model
+  the account rejects ("not supported when using Codex with a ChatGPT account" - 2026-10-12 that was the
+  config.toml default, gpt-6.1-sol, so every audit had been failing) is remembered and skipped.
+- **Every `path:line` in the reply is checked against the files** (`refs.py`). 2026-10-12, the cheap tier got
+  five subcommand names right and all five line numbers wrong, one past the end of the file. An ungrounded reply
+  prints `CODEX UNGROUNDED`, exits 3, and at the cheap tier is retried once on the mid tier; the cheap answer is
+  discarded. A reply with no references to check says so - spot-read it. Measured the same day: luna 0/6
+  three times running, then sol at effort low 6/6 - the cascade turned a wrong cheap answer into a right one
+  without the main model reading the file. A Codex model that fails a job type 3+ times here is skipped for it.
+- **Effort by job**: `low` for lookups and enumeration, `medium` for audits, `high` only for a hard review the
+  main model would otherwise spend a lot on. Higher effort burns Codex quota, not quality you can check.
+- **Ask for checkable output**: every item as `path:line - quoted line`, so the main model spot-checks 10% with
+  one read each instead of trusting the list.
+- A usage-limit failure starts a **cool-down** (parsed from Codex's own "try again in …", else 1 h) recorded in
+  `~/.token-economy/codex.json`; the router stops proposing Codex until it passes.
+- `codex_audit.py PROMPT REPLY` still works (= `codex_run.py audit … --effort medium`).
+
+## Rung 2 — Claude subagents
+
+`Agent(subagent_type: Explore, model: haiku)` for read-only locate across many files; `Agent(model: haiku)` for
+read-and-compress; `Agent(model: sonnet)` for a bounded edit or a first-pass review. Tell it the exact shape of
+the answer and to return only that, compressed.
+
+## Rules that hold on every rung
+
+- **Run `route.py --status` once per session** (it includes the Ollama probe). A daemon that lists no models
+  or answers `/api/show` with 404 for everything is stale: tell the owner to quit and restart the Ollama tray
+  app; do not kill it. Two daemons answering with different model sets (Windows + WSL sharing port 11434)
+  are reported as a WARNING: suggest giving the WSL one its own port (`OLLAMA_HOST=127.0.0.1:11435`).
+- **Verify before use.** `run.py` and `codex_run.py` check mechanically; a subagent's list of references goes
+  through `python <skill>/refs.py reply.md` (exit 3 = a cited line does not hold what it claims). Otherwise the
+  main model checks: a count against `grep -c`, a list spot-read (ten per cent), a summary against the source on the two
+  facts that matter. A result that fails the check is discarded, not corrected.
+- **One artefact per call.** Enumerate A; enumerate B; diff locally. Never "read these three files and tell me
+  what is wrong".
+- **Say what was delegated and how it was checked** in the reply - which worker, which model, which check.
+  Delegation without a stated check is a rumour with a model name on it.
+- **Never delegate the decision.** Rungs 0–2 return material; rung 3 decides.
+- **Don't fight the GPU.** If another GPU job holds the card, the router skips Ollama; never unload or kill
+  someone else's job to make room. `--keep-alive 0` unloads a model after a one-off call.
 
 ## Detached runs (rung 0) - long work that must survive a limit or a closed session
 
@@ -63,24 +154,21 @@ stalls (alive but its log silent); every run has a hard time limit (`--max-hours
 NAME` ends one at once, the watcher gives up after 2 h, nothing starts with Windows and a reboot ends all; never shut down WSL/Docker/a test VM while a run depends on it; pace work so one heavy agent or run owns the
 machine at a time, and poll status rarely (each check costs tokens; waiting does not).
 
-## Runner (rung 1)
+## Emergency: local first-pass review (`ollama_review.py`)
 
-```bash
-python ~/.claude/skills/token-economy-delegation/run.py --check
-cat src/Storefront/OrderPage.php | python ~/.claude/skills/token-economy-delegation/run.py \
-  --model qwen2.5-coder:7b --num-ctx 32768 \
-  --prompt "List every parameter of render() as 'name = default', then every conditional that adds or removes an HTML section as 'line: condition'. Output only the two lists."
-```
-
-Models on this machine: `qwen2.5-coder:7b` for code, `gemma4:e4b` for prose. Temperature 0,
-no streaming; stdin lands under `----- INPUT -----` verbatim. `--help` for flags.
+`ollama_review.py RANGE out.md` - per changed file, only when the GPU and suites are idle. Use only when Codex is
+cooling down: noisy and slow (2026-10-08: 1 real of 8), never a verdict. Its model is routed like `run.py`'s.
 
 ## Common mistakes
 
 | Mistake | Fix |
 |---|---|
-| Reading a 2000-line file in the main context to find twelve lines | rung 1 or 2, return the twelve lines |
+| Reading a 2000-line file in the main context to find twelve lines | `route.py --job list --files …`, then the command it prints |
+| Hard-coding a model name from memory | `run.py --discover`; let `--model auto` route |
 | Asking a cheap worker "is this a defect?" | ask for the list; judge it on rung 3 |
-| Trusting a count | grep the same thing; compare |
-| Assuming the daemon serves the CLI's models | `--check` first, every session |
+| Trusting a count | `--task count --count-regex` checks it; else grep the same thing |
+| Trusting a delegated `path:line` | `refs.py` - right names with wrong lines is the cheap tier's typical miss |
+| Patching a local answer that failed verification | discard it; take the next rung |
+| Sending Codex work while it is out of credit | `codex_run.py --status`; the router already skips it |
 | Delegating the write-up of a finding | findings, grades and plans are rung 3 |
+| Delegating a 5-line lookup | inline - a handoff costs more than the read |
