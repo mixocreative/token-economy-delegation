@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path.cwd()
-RUNS = Path(os.environ.get("RUNS_DIR") or os.environ.get("THREEDGEN_RUNS_DIR") or ROOT / ".runs")
+RUNS = Path(os.environ.get("RUNS_DIR") or ROOT / ".runs")
 
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200

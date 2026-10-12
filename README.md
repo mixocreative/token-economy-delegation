@@ -2,108 +2,169 @@
 
 # token-economy-delegation
 
-### 省 Token 委派 · a skill for Claude Code and OpenAI Codex
+### One router for local Ollama, Codex and Claude · a skill for Claude Code and OpenAI Codex
 
-**Stop paying your best model to read 2,000 lines and return twelve.**<br/>
-**One router across local Ollama, Codex and Claude: the cheapest worker whose answer can be *checked* gets the job — and a failed check escalates, never ships.**
+**Your best model shouldn't read 2,000 lines to return twelve.**<br/>
+**Send every bulky job to the cheapest worker whose answer can be *checked* — and escalate the moment a check fails.**
 
-**別再讓最貴的模型讀兩千行只為了找十二行。大量輸入、少量輸出的工作，交給最便宜的工人做，主模型只負責驗證與判斷。**
+**最貴的模型不該讀兩千行只為了回傳十二行。大量的機械工作交給「答案可以被驗證」的最便宜工人，驗證失敗就立刻往上交辦。**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#license) [![Claude Code skill](https://img.shields.io/badge/Claude_Code-skill-D97757)](#install) [![Codex skill](https://img.shields.io/badge/OpenAI_Codex-skill-000000)](#install) [![Ollama](https://img.shields.io/badge/Ollama-local_models-black)](#the-ladder) [![Python](https://img.shields.io/badge/Python-stdlib_only-3776AB)](#install)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)](#install) [![Codex skill](https://img.shields.io/badge/OpenAI_Codex-skill-000000)](#install) [![Ollama](https://img.shields.io/badge/Ollama-auto--discovered-black)](#what-it-routes) [![Verified answers](https://img.shields.io/badge/every_answer-verified_or_escalated-2ea44f)](#quality) [![Python](https://img.shields.io/badge/Python-stdlib_only-3776AB)](#install) [![GitHub stars](https://img.shields.io/github/stars/mixocreative/token-economy-delegation?style=social)](https://github.com/mixocreative/token-economy-delegation/stargazers)
 
-[Quick start](#quick-start) · [The ladder](#the-ladder) · [Why it doesn't cost quality](#quality) · [What it caught](#what-it-caught) · [Detached runs](#detached-runs) · [FAQ](#faq) · [Install](#install)
+[Quick start](#quick-start) · [How it works](#how-it-works) · [What it routes](#what-it-routes) · [What it caught](#what-it-caught) · [Quality](#quality) · [FAQ](#faq) · [Install](#install)
+
+```bash
+claude plugin marketplace add mixocreative/token-economy-delegation && claude plugin install token-economy-delegation@mixocreative
+```
 
 </div>
 
 ---
 
-Your agent's context window is the scarce resource. Most of what fills it is mechanical: reading a huge file to list its parameters, counting call sites, summarising a log, waiting on a seven-hour test suite. This skill makes the agent ask one question before each of those steps — *would I accept this from a grep?* — and if yes, hand it to the cheapest worker that gives the **same quality of result**: no model at all, a local Ollama model, a small subagent, or a second agent as an independent reviewer. The main model keeps every judgment, grade and decision, and checks what came back.
+Your agent reads a 2,000-line file to find twelve lines. It counts call sites by hand, summarises a log line by line, waits on a seven-hour test suite, then hits the usage limit and starts over. Most of that work needs no judgment at all, but it is all paid for at your most expensive model's price, out of your most limited resource: its context window.
 
-> Agent 的 context 是最稀缺的資源，而塞滿它的多半是機械性工作：讀大檔案列參數、數呼叫點、摘要 log、等七小時的測試。這個 Skill 讓 Agent 在每一步之前先問：「如果這是 grep 給我的結果，我能接受嗎？」能接受，就交給品質不變的最便宜工人 —— 不用模型、本機 Ollama、小型 subagent，或是另一個 Agent 當獨立審查。所有判斷、評級與決策都留在主模型，並驗證回傳的結果。
+Install this skill and your agent asks one question before each bulky step: ***could a grep have produced this answer?*** If yes, the job goes to the cheapest worker that can do it on **your** machine: a local Ollama model, Codex on its own quota, or a small Claude subagent. The answer is **checked against the source** before it is used, and if the check fails the job moves up a rung. Judgment, design and anything that ships stay with your main model.
+
+> 你的 Agent 為了找十二行讀了兩千行、手動數呼叫點、逐行摘要 log、等七小時的測試，然後撞到用量上限重來。這些工作大多不需要判斷力，卻都用最貴的模型、最有限的 context 在付錢。裝上這個 Skill，Agent 每做一件大量工作前會先問：「這個答案 grep 做得出來嗎？」可以的話，就交給你機器上最便宜的工人（本機 Ollama、用自己額度的 Codex、或小型 Claude subagent），答案用原始資料驗證後才使用，驗證失敗就往上一階交辦。判斷、設計、要上線的東西，永遠留給主模型。
 
 <a id="quick-start"></a>
 
 ## Quick start｜快速開始
 
-Ask the router who should do a job. It costs no model tokens, it never runs the job, and it reads live state: which Ollama models are installed and healthy, whether the input fits them and the free VRAM, whether Codex is cooling down after a usage limit, and how often each worker has actually passed verification on this job type **on your machine**.
+### 1. Install｜安裝
+
+```bash
+claude plugin marketplace add mixocreative/token-economy-delegation && claude plugin install token-economy-delegation@mixocreative
+```
+
+Codex, or a skills folder: see [Install](#install).
+
+### 2. Ask your agent｜直接對 Agent 說
+
+```text
+Save tokens: list every conditional in OrderPage.php with a local model, and verify it.
+```
+
+```text
+Use Codex to find every caller of reserve_stock() across the repo. Bring me only path:line.
+```
+
+```text
+Get a second opinion on this branch from Codex before I merge.
+```
+
+```text
+Run the full test suite detached so it survives if I hit the usage limit.
+```
+
+```text
+幫我省 token：用本機模型把這份 log 的錯誤全部列出來，驗證過再給我。
+```
+
+### 3. Or ask the router yourself｜或自己問路由器
 
 ```bash
 python route.py --status
-#  Ollama : 5 usable (devstral-small-2:24b, gemma4:26b, qwen3.6:27b, ...); GPU 2158/24576 MiB
+#  Ollama : 3 usable (devstral-small-2:24b, gemma4:26b, qwen3.6:27b); desktop app 0.40.2 at [::1]:11434
 #  Codex  : usable - ready
 #  Claude : subagents always available (haiku: read+compress, sonnet: bounded edit/review)
 
 python route.py --job list --files src/OrderPage.php
 #  USE Ollama qwen3.6:27b [score 2.4 (fit2 q0.50 loaded)]: python run.py --task list --number-lines --prompt "..." < input
-#    then: Codex task --effort low  ->  Claude haiku subagent  ->  main model, inline
+#    skip Codex: ~3,409 tokens of input is below its per-call overhead - a subagent is cheaper overall
+#    then: Claude haiku subagent  ->  main model, inline
 ```
 
-Or just tell your agent:
+The router costs no model tokens and never runs the job. It reads live state: which Ollama models are installed and healthy, whether the input fits them and the free VRAM, whether Codex is cooling down after a usage limit, and how often each worker has **actually passed verification on this job type on your machine**.
 
-```text
-Save tokens: list every conditional in OrderPage.php with a local model and verify it.
-Use Codex to find every caller of reserve_stock() across the repo; only bring me path:line.
-Get a second opinion on this branch from Codex before I merge.
-Run the full suite detached so it survives if I hit the usage limit.
-幫我省 token：用本機模型把這份 log 的錯誤全部列出來，驗證過再給我。
+<a id="how-it-works"></a>
+
+## How it works｜運作方式
+
+```mermaid
+flowchart LR
+    J["Bulky job<br/>big in, small out"] --> R{"route.py<br/>live state +<br/>pass-rate ledger"}
+    R -->|no judgment while it runs| D["detached.py<br/>no model"]
+    R -->|one input, checkable| O["Ollama<br/>run.py"]
+    R -->|repo-wide read| C["Codex<br/>codex_run.py"]
+    R -->|edit / review| S["Claude<br/>haiku / sonnet"]
+    R -->|judgment| M["Main model"]
+    O --> V{"verify against<br/>the source"}
+    C --> V
+    S --> V
+    V -->|pass| U["use it, say how<br/>it was checked"]
+    V -->|fail: discard| N["next rung up"]
+    N --> M
 ```
 
-<a id="the-ladder"></a>
+Every attempt is written to a local ledger (`~/.token-economy/ledger.jsonl`). A worker that keeps failing a job type on your machine stops being chosen for it.
 
-## The ladder｜委派階梯
+<a id="what-it-routes"></a>
 
-| Job shape | First choice | Fallback chain (on unavailable or failed check) |
-|---|---|---|
-| long non-AI step (suite, build, GPU walk) | **no model** — `detached.py` | — |
-| mechanical, one input, checkable (list, extract, count, classify, reformat) | **local Ollama** — `run.py`, auto-routed | Codex (cheap tier) → Claude haiku → main |
-| repo-wide read, short answer ("every caller of X") | **Codex** — `codex_run.py task`, its own quota | Claude Explore/haiku → main |
-| bounded 1–2 file edit | **Claude sonnet** subagent | main |
-| second opinion on finished work | **Codex** — `codex_run.py audit` (mid tier) | Claude sonnet reviewer → main |
-| judgment, design, security, grading, anything that ships | **main model** — never delegated | — |
+## What it routes｜交辦給誰
+
+| Job | First choice | What it needs | Fallback chain |
+|---|---|---|---|
+| Long non-AI step: test suite, build, GPU or installer run | **No model** (`detached.py`) | Python | — |
+| Mechanical work on one input: list, extract, count, classify, reformat | **Local Ollama** (`run.py`) | Ollama, any models: discovered live, started if it isn't running | Codex → Claude haiku → main |
+| Repo-wide read with a short answer ("every caller of X") | **Codex** (`codex_run.py task`, cheap tier) | Codex CLI | Claude Explore/haiku → main |
+| Bounded edit of 1–2 files | **Claude sonnet** subagent | Claude Code | main |
+| Second opinion on finished work | **Codex** (`codex_run.py audit`, mid tier) | Codex CLI | Claude sonnet reviewer → main |
+| Judgment, design, security, grading, anything that ships | **Main model**, never delegated | — | — |
+
+No Ollama? No Codex? It skips them and still saves tokens with Claude subagents and detached runs.
+
+<a id="what-it-caught"></a>
+
+## What it caught on day one｜第一天就抓到的問題
+
+Built and tested on a real workstation (RTX 3090, Windows, Ollama desktop app, Codex CLI). The old hard-coded version had missed every one of these:
+
+| Found | What was true |
+|---|---|
+| **Every default local call failed** | The skill named models that weren't installed. Discovery now reads what is actually there. |
+| **The wrong Ollama answered** | Another listener owned `127.0.0.1:11434` and answered with a different model set, so requests landed on either server at random. The skill now talks only to the native install, and starts the desktop app if it isn't running. |
+| **Every Codex audit had been failing** | The configured Codex model was rejected by the account. The router now picks from Codex's own model list and remembers rejected models. |
+| **Right names, wrong lines** | Codex's cheapest tier named every subcommand correctly and got every line number wrong, three runs in a row; one cited a line past the end of the file. `refs.py` caught it each time, and the automatic retry one tier up came back **6/6 grounded**. The main model never read the file. |
+| **A 48-token question cost 42k Codex tokens** | Codex loaded its skills on every call. A short "delegated sub-task" preamble fixes that, and the router keeps Codex for reads big enough to be worth its overhead. |
+
+And the cascade working as designed: `qwen3.6:27b` listed all 10 function definitions in a 253-line file. All 10 were grounded and matched `grep`, at 90 tok/s, and about 4,400 tokens never entered the main context.
+
+Tried it on your setup? [Open an issue](https://github.com/mixocreative/token-economy-delegation/issues) with your models, the job and what `run.py --stats` says. Real hardware numbers make the routing better for everyone.
 
 <a id="quality"></a>
 
 ## Why it doesn't cost quality｜為什麼不犧牲品質
 
-Cheap-and-unverifiable is not cheap — it's a defect the main model pays for later. So every rung below the main model is **checked mechanically against the source**, and a failed check moves the job up the ladder. The failed answer is discarded, never patched.
+Cheap-and-unverifiable is not cheap. It is a defect your main model pays for later. So every rung below the main model is **checked mechanically against the source**, and the failed answer is thrown away, never patched.
 
-- **Live discovery, never hard-coded models.** `run.py` reads every Ollama daemon (Windows *and* WSL), excludes broken and embedding models and any model the input would overflow, and routes by task fit, measured pass rate, already-loaded (a cold 17 GB load is 15–60 s) and VRAM fit (it never evicts your GPU job). Codex models come from Codex's own model list, tiered by the vendor's description: cheap for lookups, mid for audits, top only on request.
-- **Deterministic runs.** Temperature 0, thinking off for mechanical work, think-blocks stripped, context sized from the input, JSON schema enforced when given. An answer cut at the token limit is `TRUNCATED` and rejected.
-- **Verification against the input.** Cited lines must exist verbatim at their line numbers; counts must equal a regex count; JSON must parse with its required keys; every `path:line` in a Codex or subagent reply must hold what it claims (`refs.py`). Optional `--agree`: two different local models must agree.
-- **A ledger that learns.** Every attempt is logged (`~/.token-economy/ledger.jsonl`); a worker that keeps failing a job type on your machine stops being chosen for it. `run.py --stats` shows pass rates and tokens offloaded.
+| Check | What must hold | Applies to |
+|---|---|---|
+| `quotes` | every cited line exists verbatim, at the line number given | Ollama lists, extracts, reviews, summaries |
+| `count` | the number equals a regex count of the input | Ollama counts |
+| `json` | parses, with the schema's required keys (structured output enforced) | Ollama classification |
+| `refs` | every `path:line` holds the text it claims | Codex and subagent replies |
+| `TRUNCATED` | an answer cut at the token limit is rejected, never used | all |
+| `--agree` | two different local models must agree; the output is their intersection | optional, Ollama |
 
-> 便宜但無法驗證，其實不便宜。主模型以下的每一階都會拿原始資料做機械式驗證，驗證失敗就往上一階交辦，失敗的答案直接丟棄、不修補。
+Runs are deterministic: temperature 0, thinking off for mechanical work, think-blocks stripped, and context sized from the input.
 
-<a id="what-it-caught"></a>
-
-## What it caught on the first day｜第一天就抓到的問題
-
-Built and tested on a real workstation (RTX 3090, Windows + WSL, Codex CLI). Four things the old, hard-coded version never noticed:
-
-| Found | What was true |
-|---|---|
-| **Every default local call failed** | the skill named `qwen2.5-coder:7b`; the Windows daemon had devstral, gemma4 and qwen3.6 instead |
-| **Two daemons on one port** | a WSL relay and the Windows app both answered `11434` with different models, so requests landed on either at random — now discovered, routed per host, and reported |
-| **Every Codex audit was failing** | `config.toml` named a model the ChatGPT-account Codex rejects; the router now picks from Codex's own model list and remembers rejections |
-| **Right names, wrong lines** | Codex's cheapest tier listed the subcommands correctly and every line number wrong (one past the end of the file), three runs in a row. `refs.py` caught it each time; the automatic retry one tier up came back **6/6 grounded** — the main model never read the file |
-| **A 48-token question cost 42k Codex tokens** | Codex loaded its skills (including this one) on every call. Every prompt now carries a short "delegated sub-task" preamble, and the router keeps Codex for reads big enough to be worth its overhead |
-
-And the cascade working as designed: `qwen3.6:27b` listed all 10 function definitions in a 253-line file — 10/10 grounded, matching `grep`, 90 tok/s, ~4,400 tokens that never entered the main context.
+> 便宜但無法驗證，其實不便宜，那是主模型之後要付的代價。所以主模型以下的每一階都用原始資料做機械式驗證，失敗的答案直接丟掉、不修補。
 
 <a id="detached-runs"></a>
 
 ## Detached runs｜脫離 Session 的長任務
 
-Background commands in Claude Code and Codex die with the session. A usage limit mid-suite means re-running seven hours. `detached.py` starts long work as its own process, records it, and lets the next session read the result instead of re-running it:
+Background commands in Claude Code and Codex die with the session. A usage limit halfway through a seven-hour suite means running it all again. `detached.py` starts long work as its own process, so the next session reads the result instead of re-running it:
 
 ```bash
-python <skill>/detached.py start suite -- python -m pytest -q   # from the project root
-python <skill>/detached.py status                             # running / stalled / done (exit code) / died
-python <skill>/detached.py watch                              # wake only when a run ends, dies or stalls
-python <skill>/detached.py tail suite 40
+python detached.py start suite -- python -m pytest -q   # from the project root
+python detached.py status                             # running / stalled / done (exit code) / died
+python detached.py watch                              # wakes only when a run ends, dies or stalls
+python detached.py tail suite 40
 ```
 
-Nothing lingers: every run has a hard time limit (`--max-hours`, default 6) that kills its whole process tree, `stop NAME` ends it at once, nothing registers to start with the OS.
+Nothing lingers. Every run has a hard time limit (`--max-hours`, default 6) that kills its whole process tree, `stop NAME` ends it at once, and nothing registers to start with the OS.
 
 <a id="faq"></a>
 
@@ -112,66 +173,96 @@ Nothing lingers: every run has a hard time limit (`--max-hours`, default 6) that
 <details>
 <summary><strong>Won't a cheaper model make the result worse?｜便宜模型不會讓品質變差嗎？</strong></summary>
 
-Only judgment-free work is delegated, and every result is verified mechanically before use; a failed check escalates to a stronger worker and the cheap answer is thrown away. If a grep could have produced it, a local model may. If it needs the codebase's meaning, a grade or a decision, it stays with the main model.
+Only judgment-free work is delegated. Every result is verified mechanically before use, and a failed check escalates to a stronger worker. If a grep could have produced it, a local model may. If it needs the codebase's meaning, a grade or a decision, it stays with the main model.
 </details>
 
 <details>
-<summary><strong>Do I need Codex?｜一定要有 Codex 嗎？</strong></summary>
+<summary><strong>Do I need Ollama, Codex, or a GPU?｜一定要有 Ollama、Codex 或顯示卡嗎？</strong></summary>
 
-No. Without it (or while it is out of credit — the cool-down is read from Codex's own "try again in …"), the router goes straight from Ollama to a Claude haiku/sonnet subagent.
+None of them. Without Ollama the router skips local models. Without Codex, or while it's out of credit (the cool-down is read from Codex's own "try again in …"), it goes straight to Claude subagents. Detached runs need only Python. More workers means more savings.
 </details>
 
 <details>
-<summary><strong>Do I need Ollama?｜一定要裝 Ollama 嗎？</strong></summary>
+<summary><strong>Does my code leave my machine?｜程式碼會離開我的電腦嗎？</strong></summary>
 
-No. The agent probes Ollama once per session (`run.py --check`); if it is absent or stale, it skips to rung 2. Detached runs need only Python.
+Ollama jobs run entirely on your machine. Codex and Claude subagent jobs go to those providers under their own policies, as your agent already does. The skill adds no service of its own and sends nothing anywhere else.
 </details>
 
 <details>
-<summary><strong>When is delegation a waste?｜什麼時候不該委派？</strong></summary>
+<summary><strong>Which Ollama does it use?｜用哪一個 Ollama？</strong></summary>
 
-Small in, small out. A subagent re-reads its instructions and files, so a five-line lookup costs more delegated than done inline. Delegate when the input is large and the answer is short.
+The native install. On Windows that's the desktop app's server, reached on `[::1]:11434`. If it isn't running, the skill starts the desktop app (or `ollama serve` when only the CLI is installed). It never stops or restarts a running server. Set `OLLAMA_HOSTS` to point it elsewhere.
+</details>
+
+<details>
+<summary><strong>When is delegating a waste?｜什麼時候不該委派？</strong></summary>
+
+Small in, small out. A handoff costs a prompt, a reply and a check, so a five-line lookup is cheaper done inline. The router says so when the input is small.
 </details>
 
 <a id="install"></a>
 
 ## Install｜安裝
 
-Clone once and link it into each agent's skills folder:
+**Claude Code plugin (recommended)｜Claude Code 外掛（推薦）**
 
 ```bash
-git clone <this-repo> ~/skills/token-economy-delegation
+claude plugin marketplace add mixocreative/token-economy-delegation
+claude plugin install token-economy-delegation@mixocreative
+```
+
+**Skills folder, shared by Claude Code and Codex｜手動放置，Claude Code 與 Codex 共用一份**
+
+```bash
+git clone https://github.com/mixocreative/token-economy-delegation ~/skills/token-economy-delegation
 ln -s ~/skills/token-economy-delegation ~/.claude/skills/token-economy-delegation   # Claude Code
 ln -s ~/skills/token-economy-delegation ~/.codex/skills/token-economy-delegation    # Codex
 ```
 
-On Windows, use `mklink /J` instead of `ln -s`. Requirements: Python 3.10+ (stdlib only); optional Ollama; optional Codex CLI for rung 2b.
-
-> 安裝一次，再連結到各 Agent 的 skills 資料夾。需要 Python 3.10+；Ollama 與 Codex CLI 為選配。
+On Windows use `mklink /J <link> <target>` in place of `ln -s`. Requirements: Python 3.10+ (standard library only). Optional: [Ollama](https://ollama.com) and the [Codex CLI](https://github.com/openai/codex).
 
 ## Files｜檔案
 
 | File | Purpose |
 |---|---|
-| `SKILL.md` | the ladder, the verification rules, common mistakes |
-| `route.py` | who should do this job — Ollama, Codex, Claude, or no model — with the exact command and fallback chain |
-| `codex_run.py` | read-only Codex task / audit, model tier from Codex's own list, cool-down on usage limits, reference check |
+| `SKILL.md` | the ladder, the verification rules, common mistakes: what your agent reads |
+| `route.py` | who should do this job, with the exact command and the fallback chain |
+| `run.py` | local Ollama: start, discover, route, run, verify, escalate, ledger, bench, stats |
+| `codex_run.py` | read-only Codex task / audit: model tier from Codex's own list, usage-limit cool-down, reference check |
 | `refs.py` | checks every `path:line` a delegated reply cites against the files |
-| `detached.py` | start / status / watch / stop / tail long runs outside the session |
-| `run.py` | local Ollama: discovery across daemons, routing, deterministic run, verification, escalation, ledger, bench |
-| `routing.json` | optional: override which model families suit code / prose / zh |
-| `ollama_review.py` | emergency-only local first-pass review per changed file |
+| `detached.py` | long runs outside the session: start / status / watch / stop / tail |
+| `ollama_review.py` | emergency first-pass review per changed file (never a verdict) |
 | `codex_audit.py` | kept for old prompts: same as `codex_run.py audit` |
+| `routing.json` | optional: override which model families suit code / prose / Chinese |
 
-<a id="license"></a>
+## More skills by MixoCreative｜更多 MixoCreative 的 Skill
+
+- **[cia](https://github.com/mixocreative/cia)**: Code Integrity Auditor. Finds the bugs that live *between* two correct functions, and proves what it checked.
+- **[ecommerce-cia](https://github.com/mixocreative/ecommerce-cia)**: Commerce Integrity Auditor. Payments, stock, refunds and invoices, with live-verified Taiwan gateways (藍新、綠界、LINE Pay).
+
+## Star history｜Star 趨勢
+
+<a href="https://www.star-history.com/#mixocreative/token-economy-delegation&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=mixocreative/token-economy-delegation&type=Date&theme=dark" />
+    <img alt="Star history" src="https://api.star-history.com/svg?repos=mixocreative/token-economy-delegation&type=Date" />
+  </picture>
+</a>
+
+If it saved you a usage limit, a ⭐ helps the next person find it.｜如果它幫你省下了用量，給個 ⭐ 讓更多人找到它。
 
 ## Inspired by｜參考
 
-- [Houtini LM](https://mcpservers.org/servers/houtini-ai/lm) — model discovery and per-hardware performance memory, truncation flags, "Claude is the architect, the other model drafts, Claude checks".
-- [claude-ollama-agents](https://github.com/PratikHotchandani22/claude-ollama-agents) — role-specific local agents and token stats.
-- [SerpentStack model-routing](https://openskillindex.com/skills/benja-pauls-serpentstack-model-routing) — keep planning and review on the cloud model; verify generated work with the project's own checks.
-- [RouteLLM](https://github.com/lm-sys/RouteLLM) — routing between a cheap and a strong model by expected quality. This skill uses a cascade instead: try cheap, verify, escalate.
+- [Houtini LM](https://mcpservers.org/servers/houtini-ai/lm): model discovery, performance memory per machine, truncation flags, and "Claude is the architect, the other model drafts, Claude checks".
+- [claude-ollama-agents](https://github.com/PratikHotchandani22/claude-ollama-agents): role-specific local agents and token stats.
+- [SerpentStack model-routing](https://openskillindex.com/skills/benja-pauls-serpentstack-model-routing): keeps planning and review on the cloud model, and verifies with the project's own checks.
+- [RouteLLM](https://github.com/lm-sys/RouteLLM): routes between a cheap and a strong model by predicted quality. This skill uses a cascade instead: try cheap, verify, escalate.
+- [REA](https://github.com/morluto/rea): "every conclusion distinguishes observations, inferences and unknowns".
+
+## Contributing｜貢獻
+
+Bug, new worker or better verifier? [Open an issue](https://github.com/mixocreative/token-economy-delegation/issues) or a pull request. Measured results on your hardware are the most useful contribution.
 
 ## License｜授權
 
-MIT — add a `LICENSE` file before publishing. Part of [MixoCreative](https://github.com/mixocreative)'s open skills, alongside [cia](https://github.com/mixocreative/cia) and [ecommerce-cia](https://github.com/mixocreative/ecommerce-cia).
+[MIT](LICENSE)

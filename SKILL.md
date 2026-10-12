@@ -1,6 +1,6 @@
 ---
 name: token-economy-delegation
-description: Use at the start of any task that would pull a large amount of text through the main context — reading big files, enumerating conditionals or parameters, listing call sites, repo-wide searches, tabulating or reformatting a long document, summarising logs, first-pass reviews, second opinions — and whenever the user says "use ollama", "local model", "use codex", "save tokens", "use a subagent", "cheaper model", or asks which model should do a job. Routes each job to the cheapest worker whose answer can be checked - no model, local Ollama (auto-discovered, verified, escalates on failure), Codex on its own quota, a Claude haiku/sonnet subagent, or the main model - and learns per-machine pass rates. Also for long non-AI steps (test suites, builds, GPU walks) that must survive a usage limit: run detached, read the result on resume. Applies in every Claude Code and Codex session (one shared copy: S:\ai\skills\token-economy-delegation, linked from both ~/.claude/skills and ~/.codex/skills).
+description: Use at the start of any task that would pull a large amount of text through the main context — reading big files, enumerating conditionals or parameters, listing call sites, repo-wide searches, tabulating or reformatting a long document, summarising logs, first-pass reviews, second opinions — and whenever the user says "use ollama", "local model", "use codex", "save tokens", "use a subagent", "cheaper model", or asks which model should do a job. Routes each job to the cheapest worker whose answer can be checked - no model, local Ollama (auto-discovered, verified, escalates on failure), Codex on its own quota, a Claude haiku/sonnet subagent, or the main model - and learns per-machine pass rates. Also for long non-AI steps (test suites, builds, GPU walks) that must survive a usage limit: run detached, read the result on resume. Applies in every Claude Code and Codex session (keep one copy and link it into both ~/.claude/skills and ~/.codex/skills).
 ---
 
 # Delegation for token economy
@@ -52,7 +52,7 @@ exits 4 with `ESCALATE: <reason>`; `codex_run.py` exits 2 with `CODEX FAILED: <r
 ## Rung 1 — local Ollama, routed and verified (`run.py`)
 
 ```bash
-python <skill>/run.py --discover                 # models on every daemon: health, context, caps, VRAM fit, speed, routing preview
+python <skill>/run.py --discover                 # server, models, health, context, caps, VRAM fit, speed, routing preview
 python <skill>/run.py --bench all                # measure tok/s on this machine once (GPU idle), improves routing
 cat file.php | python <skill>/run.py --task list --number-lines \
   --prompt "List every conditional that adds or removes an HTML section."
@@ -62,20 +62,24 @@ python <skill>/run.py --stats                    # pass rate and tokens offloade
 
 What `run.py` does so delegation does not cost quality:
 
-1. **Discovers, never assumes.** Model names are read live from every daemon (`OLLAMA_HOSTS`, default
-   `[::1]:11434, 127.0.0.1:11434, 127.0.0.1:11435`). Broken models (`/api/show` 404), embedding models and
-   models whose context the input would overflow are excluded. Never hard-code a model name in a prompt
-   or handoff: the set changes (2026-10-12 it was four models on Windows and four different ones in WSL).
-2. **Routes** by task fit (code → devstral / coder / qwen; prose → gemma / qwen; zh → qwen), measured pass
+1. **Uses the native Ollama, and starts it if needed.** On Windows that is the desktop app's server, reached on
+   `[::1]:11434` - never `127.0.0.1`, which another listener (a WSL relay, a container, a second install) can
+   own with a different model set, as happened 2026-10-12. If nothing answers, `run.py` starts the desktop app
+   (stabler: it supervises and updates the server), else `ollama serve` from the Windows CLI; it never stops
+   or restarts a running server. `OLLAMA_HOSTS` overrides this on purpose.
+2. **Discovers, never assumes.** Model names are read live. Broken models (`/api/show` 404), embedding models
+   and models whose context the input would overflow are excluded. Never hard-code a model name in a prompt
+   or handoff: the set changes.
+3. **Routes** by task fit (code → devstral / coder / qwen; prose → gemma / qwen; zh → qwen), measured pass
    rate here, already-loaded (a cold 15–18 GB load costs 15–60 s), VRAM fit (never evict a GPU job), speed.
    Override the family table in `routing.json`; pin with `--model NAME`.
-3. **Runs deterministically**: temperature 0, thinking off for mechanical tasks, think-blocks stripped,
+4. **Runs deterministically**: temperature 0, thinking off for mechanical tasks, think-blocks stripped,
    context sized from the input, JSON schema enforced when `--schema` is given. An answer cut at the token
    limit is `TRUNCATED` and rejected.
-4. **Verifies against the input**: `quotes` - every cited line must exist verbatim (with `--number-lines`,
+5. **Verifies against the input**: `quotes` - every cited line must exist verbatim (with `--number-lines`,
    at that line number); `count` - must equal the regex count; `json` - must parse and carry the schema's
    required keys. `--agree` additionally requires two different models to agree (output = intersection).
-5. **Escalates**: tries the next candidate, then exits 4. Every attempt goes to the ledger, so the router
+6. **Escalates**: tries the next candidate, then exits 4. Every attempt goes to the ledger, so the router
    learns. Infrastructure errors (daemon closed the connection) are logged but do not count against a model.
 
 Choosing `--task`: `list` / `extract` (quotes), `count` (count), `classify` (json), `format`, `summarize`,
@@ -120,10 +124,12 @@ the answer and to return only that, compressed.
 
 ## Rules that hold on every rung
 
-- **Run `route.py --status` once per session** (it includes the Ollama probe). A daemon that lists no models
-  or answers `/api/show` with 404 for everything is stale: tell the owner to quit and restart the Ollama tray
-  app; do not kill it. Two daemons answering with different model sets (Windows + WSL sharing port 11434)
-  are reported as a WARNING: suggest giving the WSL one its own port (`OLLAMA_HOST=127.0.0.1:11435`).
+- **Run `route.py --status` once per session** (it includes the Ollama probe, and starts the desktop app if it
+  is not running). A server that lists no models or answers `/api/show` with 404 for everything is stale: tell
+  the owner to quit and restart the Ollama desktop app; do not kill it. Use the `ollama` command line only for
+  pulling and removing models, and check `run.py --discover` afterwards - on a machine with a second listener on
+  `127.0.0.1:11434` the CLI can talk to the wrong server (2026-10-12: `ollama rm` answered "not found" for a
+  model the desktop app held).
 - **Verify before use.** `run.py` and `codex_run.py` check mechanically; a subagent's list of references goes
   through `python <skill>/refs.py reply.md` (exit 3 = a cited line does not hold what it claims). Otherwise the
   main model checks: a count against `grep -c`, a list spot-read (ten per cent), a summary against the source on the two

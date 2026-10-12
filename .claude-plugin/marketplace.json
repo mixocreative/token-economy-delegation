@@ -1,0 +1,16 @@
+{
+  "name": "mixocreative",
+  "description": "Mixocreative skills for Claude Code and Codex",
+  "owner": {
+    "name": "mixocreative",
+    "url": "https://github.com/mixocreative"
+  },
+  "plugins": [
+    {
+      "name": "token-economy-delegation",
+      "source": "./",
+      "description": "One router across local Ollama, Codex and Claude: the cheapest worker whose answer can be checked gets the job; a failed check escalates.",
+      "version": "1.0.0"
+    }
+  ]
+}

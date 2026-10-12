@@ -148,7 +148,7 @@ def show_status() -> int:
         st = run.discover()
         ok = [n for n, m in st["models"].items() if m.get("healthy")]
         g = st["gpu"]
-        print(f"Ollama : {len(ok)} usable ({', '.join(sorted(ok))}); daemons {', '.join(st['hosts'])}"
+        print(f"Ollama : {len(ok)} usable ({', '.join(sorted(ok))}); {run.server_info()}"
               + (f"; GPU {g['used_mib']}/{g['total_mib']} MiB" if g else ""))
         if st.get("warn"):
             print("         WARNING: " + st["warn"])

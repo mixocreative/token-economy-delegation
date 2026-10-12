@@ -1,0 +1,15 @@
+{
+  "name": "token-economy-delegation",
+  "displayName": "Token Economy Delegation",
+  "version": "1.0.0",
+  "description": "One router across local Ollama, Codex and Claude subagents: sends each bulky job to the cheapest worker whose answer can be checked, verifies it against the source, escalates on failure, and learns per-machine pass rates. Plus detached runs that survive a usage limit.",
+  "author": {
+    "name": "mixocreative",
+    "url": "https://github.com/mixocreative"
+  },
+  "homepage": "https://github.com/mixocreative/token-economy-delegation",
+  "repository": "https://github.com/mixocreative/token-economy-delegation",
+  "license": "MIT",
+  "keywords": ["claude-code", "codex", "skill", "ollama", "local-llm", "token-economy", "model-routing", "delegation", "cost"],
+  "skills": ["./"]
+}

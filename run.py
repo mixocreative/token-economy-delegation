@@ -31,6 +31,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -38,12 +39,15 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# Every daemon that may answer. On this machine two do (2026-10-12): the Windows app listens on [::], and a
-# wslrelay forwards 127.0.0.1:11434 to a second Ollama inside WSL with a different model set - so a bare
-# 127.0.0.1 request lands on either one. Discovery asks each host and routes every model to a host that has it.
+# The native Ollama install only: on Windows the desktop app (it runs and updates the server) or, without it, the
+# Windows CLI's `ollama serve`. Reached on [::1], never 127.0.0.1: on Windows another listener (a WSL relay, a
+# container, a second install) can own the IPv4 loopback port and answer with a different model set - seen
+# 2026-10-12. Set OLLAMA_HOSTS (comma-separated) to use other or several daemons on purpose.
+WINDOWS = os.name == "nt"
 HOSTS = [h.strip().rstrip("/") for h in os.environ.get(
-    "OLLAMA_HOSTS", "http://[::1]:11434,http://127.0.0.1:11434,http://127.0.0.1:11435").split(",") if h.strip()]
+    "OLLAMA_HOSTS", "http://[::1]:11434" if WINDOWS else "http://127.0.0.1:11434").split(",") if h.strip()]
 HOST = HOSTS[0]
+OLLAMA_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" if WINDOWS else None
 HOME = Path(os.environ.get("TOKEN_ECONOMY_HOME") or Path.home() / ".token-economy")
 CACHE = HOME / "models.json"
 LEDGER = HOME / "ledger.jsonl"
@@ -118,6 +122,63 @@ def save_cache(c: dict) -> None:
     CACHE.write_text(json.dumps(c, indent=1), encoding="utf-8")
 
 
+def server_up() -> bool:
+    for h in HOSTS:
+        try:
+            api("/api/version", host=h, timeout=3)
+            return True
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+    return False
+
+
+def ensure_server(wait: float = 25) -> str:
+    """Start the native Ollama if nothing answers: the desktop app if installed (stabler - it supervises and updates
+    the server), else `ollama serve` from the CLI. Never stops or restarts a running one. Returns what it did."""
+    if server_up():
+        return "running"
+    how = None
+    flags = (0x00000008 | 0x00000200 | 0x08000000) if WINDOWS else 0   # detached, own group, no window
+    app = OLLAMA_DIR / "ollama app.exe" if OLLAMA_DIR else None
+    try:
+        if app and app.exists():
+            subprocess.Popen([str(app)], creationflags=flags, close_fds=True)
+            how = "started the Ollama desktop app"
+        else:
+            cli = shutil.which("ollama") or (str(OLLAMA_DIR / "ollama.exe") if OLLAMA_DIR and (OLLAMA_DIR / "ollama.exe").exists() else None)
+            if not cli:
+                return "not installed"
+            subprocess.Popen([cli, "serve"], creationflags=flags, close_fds=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=not WINDOWS)
+            how = "started `ollama serve`"
+    except OSError as e:
+        return f"could not start ({e})"
+    t0 = time.time()
+    while time.time() - t0 < wait:
+        time.sleep(1)
+        if server_up():
+            return how
+    return how + f", but it did not answer within {wait:.0f} s"
+
+
+def server_info() -> str:
+    try:
+        v = api("/api/version", timeout=3).get("version", "?")
+    except (urllib.error.URLError, OSError, ValueError):
+        return "not answering"
+    kind = "desktop app" if WINDOWS and _running("ollama app.exe") else ("CLI `ollama serve`" if WINDOWS else "ollama serve")
+    return f"{kind} {v} at {HOST.split('//')[1]}"
+
+
+def _running(image: str) -> bool:
+    try:
+        out = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {image}", "/NH"], capture_output=True, text=True,
+                             timeout=10, creationflags=0x08000000).stdout
+        return image.lower() in out.lower()
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def discover(refresh: bool = False) -> dict:
     """Installed models across every reachable daemon, with what routing needs.
 
@@ -144,7 +205,10 @@ def discover(refresh: bool = False) -> dict:
         except (urllib.error.URLError, OSError, ValueError):
             pass
     if not hosts_up:
-        raise urllib.error.URLError("no Ollama daemon answered at " + ", ".join(HOSTS))
+        started = ensure_server()
+        if started in ("running",) or (started.startswith("started") and "did not answer" not in started):
+            return discover(refresh)
+        raise urllib.error.URLError(f"no Ollama answered at {', '.join(HOSTS)} ({started})")
     for name, e in seen.items():
         t = e["tag"]
         m = known.get(name, {})
@@ -175,11 +239,9 @@ def discover(refresh: bool = False) -> dict:
         del known[gone]
     save_cache(cache)
     warn = None
-    distinct = {tuple(v) for v in sets.values()}
-    if len(distinct) > 1:
-        warn = ("several Ollama daemons answer with different models (" + "; ".join(f"{h}: {len(v)}" for h, v in sets.items())
-                + "). They share one GPU, and if two listen on the same port a request lands on either. "
-                  "Give each its own port (e.g. OLLAMA_HOST=127.0.0.1:11435 for the WSL one).")
+    if len({tuple(v) for v in sets.values()}) > 1:
+        warn = ("OLLAMA_HOSTS lists daemons with different models (" + "; ".join(f"{h}: {len(v)}" for h, v in sets.items())
+                + "); they share one GPU - routing sends each model to a daemon that has it.")
     return {"models": known, "loaded": loaded, "gpu": gpu(), "hosts": hosts_up, "warn": warn}
 
 
@@ -473,7 +535,7 @@ def show_discover(refresh: bool) -> int:
     s = discover(refresh)
     g = s["gpu"]
     print(f"GPU: {g.get('used_mib', '?')}/{g.get('total_mib', '?')} MiB used" if g else "GPU: no nvidia-smi")
-    print("daemons: " + ", ".join(s["hosts"]))
+    print("ollama: " + server_info() + (f" (+ {', '.join(s['hosts'][1:])})" if len(s["hosts"]) > 1 else ""))
     if s.get("warn"):
         print("WARNING: " + s["warn"])
     print(f"{'model':28} {'ok':3} {'size':>6} {'ctx':>7} {'caps':32} {'tok/s':>6} loaded")
