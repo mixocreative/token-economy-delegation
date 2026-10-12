@@ -14,7 +14,7 @@
 [Quick start](#quick-start) · [How it works](#how-it-works) · [What it routes](#what-it-routes) · [What it caught](#what-it-caught) · [Quality](#quality) · [FAQ](#faq) · [Install](#install)
 
 ```bash
-claude plugin marketplace add mixocreative/token-economy-delegation && claude plugin install token-economy-delegation@mixocreative-token-economy
+claude plugin marketplace add mixocreative/token-economy-delegation && claude plugin install token-economy-delegation@mixocreative
 ```
 
 </div>
@@ -34,7 +34,7 @@ Install this skill and your agent asks one question before each bulky step: ***c
 ### 1. Install｜安裝
 
 ```bash
-claude plugin marketplace add mixocreative/token-economy-delegation && claude plugin install token-economy-delegation@mixocreative-token-economy
+claude plugin marketplace add mixocreative/token-economy-delegation && claude plugin install token-economy-delegation@mixocreative
 ```
 
 Codex, or a skills folder: see [Install](#install).
@@ -208,7 +208,7 @@ Small in, small out. A handoff costs a prompt, a reply and a check, so a five-li
 
 ```bash
 claude plugin marketplace add mixocreative/token-economy-delegation
-claude plugin install token-economy-delegation@mixocreative-token-economy
+claude plugin install token-economy-delegation@mixocreative
 ```
 
 **Skills folder, shared by Claude Code and Codex｜手動放置，Claude Code 與 Codex 共用一份**
