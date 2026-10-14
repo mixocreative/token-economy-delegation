@@ -109,6 +109,49 @@ def configured_model() -> str | None:
         return None
 
 
+CHATGPT_BACKEND = "https://chatgpt.com/backend-api/codex"
+
+
+def app_session_model() -> str | None:
+    """The model the Codex app (not codex exec) used in its newest session: proof the account accepts it today.
+    A fallback for when models_cache.json is stale and every listed model is rejected (2026-10-14: gpt-5.5 and
+    gpt-5 were dropped while the app moved on). Never a local / Ollama model."""
+    try:
+        files = sorted((CODEX_HOME / "sessions").rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)[:40]
+    except OSError:
+        return None
+    for f in files:
+        try:
+            head = f.read_text(encoding="utf-8", errors="replace")[:200_000]
+        except OSError:
+            continue
+        if '"originator":"codex_exec"' in head or '"originator":"Claude Code"' in head:
+            continue
+        m = re.search(r'"model":"(gpt-[^"]+)"', head)
+        if m and m.group(1) not in state().get("bad_models", []):
+            return m.group(1)
+    return None
+
+
+def backend_override() -> list[str]:
+    """`-c openai_base_url=...` when config.toml points Codex at a LOCAL server (e.g. Ollama on 127.0.0.1:11434)
+    while the login is a ChatGPT account: a delegated Codex job must reach real Codex, not the local model, and the
+    owner's config.toml is never edited (2026-10-14: the local base URL silently sent audits to a 32B Ollama model).
+    Empty when the config already targets OpenAI or when the login is an API key (then the CLI's default is right)."""
+    try:
+        cfg = (CODEX_HOME / "config.toml").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    m = re.search(r'^\s*openai_base_url\s*=\s*"([^"]+)"', cfg, re.M)
+    if not m or not re.search(r"//(localhost|127\.|0\.0\.0\.0|\[::1\])", m.group(1)):
+        return []
+    try:
+        mode = json.loads((CODEX_HOME / "auth.json").read_text(encoding="utf-8")).get("auth_mode")
+    except (OSError, ValueError):
+        mode = None
+    return ["-c", f'openai_base_url="{CHATGPT_BACKEND}"'] if mode == "chatgpt" else ["-c", 'openai_base_url="https://api.openai.com/v1"']
+
+
 def exe() -> str | None:
     return shutil.which("codex") or shutil.which("codex.cmd")
 
@@ -150,6 +193,9 @@ def run(mode: str, prompt: Path, reply: Path, effort: str | None, model: str | N
         return 2
     want = tier or DEFAULT_TIER[mode]
     candidates = [model] if model else (pick(want, mode)[:3] or [None])   # None = config.toml's model
+    live = app_session_model()
+    if live and live not in candidates:
+        candidates.append(live)   # last resort: whatever the Codex app itself used most recently
     last = 2
     for m in candidates:
         last, unsupported = _once(mode, prompt, reply, effort, m, schema, timeout)
@@ -168,6 +214,7 @@ def run(mode: str, prompt: Path, reply: Path, effort: str | None, model: str | N
 def _once(mode: str, prompt: Path, reply: Path, effort: str | None, model: str | None, schema: str | None,
           timeout: float) -> tuple[int, bool]:
     cmd = [exe(), "exec", "-s", "read-only", "-C", str(Path.cwd()), "--skip-git-repo-check", "--json", "-o", str(reply)]
+    cmd += backend_override()
     if effort:
         cmd += ["-c", f'model_reasoning_effort="{effort}"']
     if model:

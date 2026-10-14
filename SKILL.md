@@ -93,6 +93,12 @@ python <skill>/codex_run.py task  prompt.md reply.md --effort low      # repo-re
 python <skill>/codex_run.py audit prompt.md reply.md --effort medium   # second opinion: reply must carry VERDICT
 ```
 
+- **Never hard-code a Codex model name** (`-m gpt-5.5` broke on 2026-10-14 when the account dropped it). Always go
+  through `codex_run.py`: it reads Codex's own live model list (`~/.codex/models_cache.json`, refreshed by the CLI),
+  tries the best model of the wanted tier first, marks a model the account rejects as bad and moves to the next. As
+  a last resort it uses the model the Codex app itself used in its newest session. `--status` prints the list it
+  would use. If `config.toml` points Codex at a local server (Ollama) while the login is ChatGPT, it adds the
+  ChatGPT backend override per call and never edits the config.
 - Read-only sandbox, always. Run from the repository Codex should read. Launch it through `detached.py` when the
   calling shell may time out - a killed parent kills the Codex child mid-answer.
 - **Per-call overhead is large**: 40–125k Codex tokens per call whatever the question (measured 2026-10-12, even
