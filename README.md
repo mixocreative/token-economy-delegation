@@ -23,9 +23,9 @@ claude plugin marketplace add mixocreative/token-economy-delegation && claude pl
 
 Your agent reads a 2,000-line file to find twelve lines. It counts call sites by hand, summarises a log line by line, waits on a seven-hour test suite, then hits the usage limit and starts over. Most of that work needs no judgment at all, but it is all paid for at your most expensive model's price, out of your most limited resource: its context window.
 
-Install this skill and your agent asks one question before each bulky step: ***could a grep have produced this answer?*** If yes, the job goes to the cheapest worker that can do it on **your** machine: a local Ollama model, Codex on its own quota, or a small Claude subagent. The answer is **checked against the source** before it is used, and if the check fails the job moves up a rung. Judgment, design and anything that ships stay with your main model.
+Install this skill and your agent asks one question before each bulky step: ***could a grep have produced this answer?*** If yes, the job goes to the cheapest currently available worker that can do it on **your** machine: a live-discovered local Ollama model, Codex on its own quota, or a platform subagent discovered at call time. The answer is **checked against the source** before it is used, and if the check fails the job moves up a rung. Judgment, design and anything that ships stay with your main model.
 
-> 你的 Agent 為了找十二行讀了兩千行、手動數呼叫點、逐行摘要 log、等七小時的測試，然後撞到用量上限重來。這些工作大多不需要判斷力，卻都用最貴的模型、最有限的 context 在付錢。裝上這個 Skill，Agent 每做一件大量工作前會先問：「這個答案 grep 做得出來嗎？」可以的話，就交給你機器上最便宜的工人（本機 Ollama、用自己額度的 Codex、或小型 Claude subagent），答案用原始資料驗證後才使用，驗證失敗就往上一階交辦。判斷、設計、要上線的東西，永遠留給主模型。
+> 你的 Agent 為了找十二行讀了兩千行、手動數呼叫點、逐行摘要 log、等七小時的測試，然後撞到用量上限重來。這些工作大多不需要判斷力，卻都用最貴的模型、最有限的 context 在付錢。裝上這個 Skill，Agent 每做一件大量工作前會先問：「這個答案 grep 做得出來嗎？」可以的話，就交給目前實際可用、最便宜的工人（即時探索的本機 Ollama、用自己額度的 Codex、或平台目前支援的 subagent），答案用原始資料驗證後才使用，驗證失敗就往上一階交辦。判斷、設計、要上線的東西，永遠留給主模型。
 
 <a id="quick-start"></a>
 
@@ -67,12 +67,12 @@ Run the full test suite detached so it survives if I hit the usage limit.
 python route.py --status
 #  Ollama : 3 usable (devstral-small-2:24b, gemma4:26b, qwen3.6:27b); desktop app 0.40.2 at [::1]:11434
 #  Codex  : usable - ready
-#  Claude : subagents always available (haiku: read+compress, sonnet: bounded edit/review)
+#  Platform: discover available subagents/models from the current host before delegation; never guess a model name
 
 python route.py --job list --files src/OrderPage.php
 #  USE Ollama qwen3.6:27b [score 2.4 (fit2 q0.50 loaded)]: python run.py --task list --number-lines --prompt "..." < input
 #    skip Codex: ~3,409 tokens of input is below its per-call overhead - a subagent is cheaper overall
-#    then: Claude haiku subagent  ->  main model, inline
+#    then: Platform read subagent (discover first)  ->  main model, inline
 ```
 
 The router costs no model tokens and never runs the job. It reads live state: which Ollama models are installed and healthy, whether the input fits them and the free VRAM, whether Codex is cooling down after a usage limit, and how often each worker has **actually passed verification on this job type on your machine**.
@@ -87,7 +87,7 @@ flowchart LR
     R -->|no judgment while it runs| D["detached.py<br/>no model"]
     R -->|one input, checkable| O["Ollama<br/>run.py"]
     R -->|repo-wide read| C["Codex<br/>codex_run.py"]
-    R -->|edit / review| S["Claude<br/>haiku / sonnet"]
+    R -->|edit / review| S["Platform subagent<br/>discovered live"]
     R -->|judgment| M["Main model"]
     O --> V{"verify against<br/>the source"}
     C --> V
@@ -106,13 +106,13 @@ Every attempt is written to a local ledger (`~/.token-economy/ledger.jsonl`). A 
 | Job | First choice | What it needs | Fallback chain |
 |---|---|---|---|
 | Long non-AI step: test suite, build, GPU or installer run | **No model** (`detached.py`) | Python | — |
-| Mechanical work on one input: list, extract, count, classify, reformat | **Local Ollama** (`run.py`) | Ollama, any models: discovered live, started if it isn't running | Codex → Claude haiku → main |
-| Repo-wide read with a short answer ("every caller of X") | **Codex** (`codex_run.py task`, cheap tier) | Codex CLI | Claude Explore/haiku → main |
-| Bounded edit of 1–2 files | **Claude sonnet** subagent | Claude Code | main |
-| Second opinion on finished work | **Codex** (`codex_run.py audit`, mid tier) | Codex CLI | Claude sonnet reviewer → main |
+| Mechanical work on one input: list, extract, count, classify, reformat | **Local Ollama** (`run.py`) | Ollama, any models: discovered live, started if it isn't running | Codex → discovered platform subagent → main |
+| Repo-wide read with a short answer ("every caller of X") | **Codex** (`codex_run.py task`, cheap tier) | Codex CLI | discovered platform subagent → main |
+| Bounded edit of 1–2 files | **Discovered platform subagent** | A host-advertised compatible worker; omit the model override if compatibility cannot be checked | main |
+| Second opinion on finished work | **Codex** (`codex_run.py audit`, mid tier) | Codex CLI | discovered platform reviewer → main |
 | Judgment, design, security, grading, anything that ships | **Main model**, never delegated | — | — |
 
-No Ollama? No Codex? It skips them and still saves tokens with Claude subagents and detached runs.
+No Ollama? No Codex? It discovers what the current platform can actually run and still saves tokens with compatible subagents and detached runs. It never guesses a model name from an example or an earlier session.
 
 <a id="what-it-caught"></a>
 
@@ -179,13 +179,13 @@ Only judgment-free work is delegated. Every result is verified mechanically befo
 <details>
 <summary><strong>Do I need Ollama, Codex, or a GPU?｜一定要有 Ollama、Codex 或顯示卡嗎？</strong></summary>
 
-None of them. Without Ollama the router skips local models. Without Codex, or while it's out of credit (the cool-down is read from Codex's own "try again in …"), it goes straight to Claude subagents. Detached runs need only Python. More workers means more savings.
+None of them. Without Ollama the router skips local models. Without Codex, or while it's out of credit (the cool-down is read from Codex's own "try again in …"), it uses a subagent only after discovering a compatible worker from the current platform. Detached runs need only Python. More workers means more savings.
 </details>
 
 <details>
 <summary><strong>Does my code leave my machine?｜程式碼會離開我的電腦嗎？</strong></summary>
 
-Ollama jobs run entirely on your machine. Codex and Claude subagent jobs go to those providers under their own policies, as your agent already does. The skill adds no service of its own and sends nothing anywhere else.
+Ollama jobs run entirely on your machine. Codex and platform-subagent jobs go to those providers under their own policies, as your agent already does. The skill adds no service of its own and sends nothing anywhere else.
 </details>
 
 <details>

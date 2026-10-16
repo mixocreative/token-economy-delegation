@@ -1,6 +1,6 @@
 ---
 name: token-economy-delegation
-description: Use at the start of any task that would pull a large amount of text through the main context — reading big files, enumerating conditionals or parameters, listing call sites, repo-wide searches, tabulating or reformatting a long document, summarising logs, first-pass reviews, second opinions — and whenever the user says "use ollama", "local model", "use codex", "save tokens", "use a subagent", "cheaper model", or asks which model should do a job. Routes each job to the cheapest worker whose answer can be checked - no model, local Ollama (auto-discovered, verified, escalates on failure), Codex on its own quota, a Claude haiku/sonnet subagent, or the main model - and learns per-machine pass rates. Also for long non-AI steps (test suites, builds, GPU walks) that must survive a usage limit: run detached, read the result on resume. Applies in every Claude Code and Codex session (keep one copy and link it into both ~/.claude/skills and ~/.codex/skills).
+description: Use at the start of any task that would pull a large amount of text through the main context — reading big files, enumerating conditionals or parameters, listing call sites, repo-wide searches, tabulating or reformatting a long document, summarising logs, first-pass reviews, second opinions — and whenever the user says "use ollama", "local model", "use codex", "save tokens", "use a subagent", "cheaper model", or asks which model should do a job. Also use for long non-AI steps that must survive a usage limit. Applies in every Claude Code and Codex session.
 ---
 
 # Delegation for token economy
@@ -23,7 +23,7 @@ Two tests decide everything:
 ## Start here: ask the router (costs no model tokens)
 
 ```bash
-python <skill>/route.py --status                               # what is usable now: Ollama models, Codex, Claude
+python <skill>/route.py --status                               # what is usable now: Ollama, Codex, platform agents
 python <skill>/route.py --job list --files src/OrderPage.php   # who should do this job, the exact command, the fallback chain
 ```
 
@@ -33,6 +33,11 @@ healthy, whether the input fits their context and the free VRAM, whether Codex i
 limit, and the **measured pass rate of each worker on this job type on this machine** (`~/.token-economy/ledger.jsonl`).
 A worker that keeps failing verification for a job type is skipped for it automatically.
 
+**Discovery gate for every provider:** use live availability reported by the current host, router, or tool before
+selecting a worker. Never copy a model name from this file, an example, memory, or a previous session. For platform
+subagents, use an authoritative capability/status call when one exists. If the platform exposes no compatibility
+check, omit the model override and let the platform select; do not probe by trying a sequence of guessed names.
+
 ## The ladder
 
 | Rung | Worker | Fits when | Main-context cost |
@@ -40,13 +45,12 @@ A worker that keeps failing verification for a job type is skipped for it automa
 | 0 | **No model** — `detached.py` | test suite, build, smoke/walk scripts, installer or GPU runs, big downloads | ~0, survives the session |
 | 1 | **Local Ollama** — `run.py` (auto-routed) | one input, mechanical, **output checkable against the input**: enumerate, extract, count, reformat, classify, first-pass summary | prompt + verified answer |
 | 2 | **Codex** — `codex_run.py task` (effort low) | repo-wide reading with a short answer: callers, usages, "where is X handled"; Codex reads the files in its own context on its own quota | prompt + reply |
-| 2 | **Claude haiku / Explore subagent** | same as above when Codex is unavailable, or when Claude Code tools are needed | prompt + compressed reply |
-| 2 | **Claude sonnet subagent** | a bounded 1–2 file edit; a first-pass review | prompt + diff/reply |
+| 2 | **Discovered platform subagent** | repo reads, bounded edits, or reviews when the host advertises a compatible lower-cost worker | prompt + compressed reply/diff |
 | 2b | **Codex audit** — `codex_run.py audit` (effort medium) | a second opinion on finished work: review, plan consolidation, gap-finding; returns a VERDICT | prompt + verdict |
 | 3 | **Main model** | judgment, design, security, grading, anything that lands in a plan or register, code that ships | full |
 
 **Escalation is the quality guarantee.** Each rung's answer is checked; a failed check moves the job up,
-and **the failed answer is discarded, never patched**: Ollama → Codex → Claude subagent → main. `run.py`
+and **the failed answer is discarded, never patched**: Ollama → Codex → discovered platform subagent → main. `run.py`
 exits 4 with `ESCALATE: <reason>`; `codex_run.py` exits 2 with `CODEX FAILED: <reason>`.
 
 ## Rung 1 — local Ollama, routed and verified (`run.py`)
@@ -122,11 +126,13 @@ python <skill>/codex_run.py audit prompt.md reply.md --effort medium   # second 
   `~/.token-economy/codex.json`; the router stops proposing Codex until it passes.
 - `codex_audit.py PROMPT REPLY` still works (= `codex_run.py audit … --effort medium`).
 
-## Rung 2 — Claude subagents
+## Rung 2 — platform subagents
 
-`Agent(subagent_type: Explore, model: haiku)` for read-only locate across many files; `Agent(model: haiku)` for
-read-and-compress; `Agent(model: sonnet)` for a bounded edit or a first-pass review. Tell it the exact shape of
-the answer and to return only that, compressed.
+Inspect the current platform's advertised workers and model compatibility immediately before delegating. Choose
+the cheapest compatible worker for the bounded role (read/explore, edit, or review). Do not name a model from
+memory or from documentation examples. If there is no authoritative compatibility check, omit the model override
+and let the platform choose rather than spending calls on guessed names. Tell the subagent the exact answer shape
+and request only the compressed result.
 
 ## Rules that hold on every rung
 
@@ -177,6 +183,7 @@ cooling down: noisy and slow (2026-10-08: 1 real of 8), never a verdict. Its mod
 |---|---|
 | Reading a 2000-line file in the main context to find twelve lines | `route.py --job list --files …`, then the command it prints |
 | Hard-coding a model name from memory | `run.py --discover`; let `--model auto` route |
+| Hard-coding a platform subagent model | Query the host's live capabilities; if that cannot verify compatibility, omit the model override |
 | Asking a cheap worker "is this a defect?" | ask for the list; judge it on rung 3 |
 | Trusting a count | `--task count --count-regex` checks it; else grep the same thing |
 | Trusting a delegated `path:line` | `refs.py` - right names with wrong lines is the cheap tier's typical miss |

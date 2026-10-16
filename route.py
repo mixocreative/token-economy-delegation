@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-r"""Decide who does a job: no model, local Ollama, Codex, a cheap Claude subagent, or the main model.
+r"""Decide who does a job: no model, local Ollama, Codex, a discovered platform subagent, or the main model.
 
     python route.py --job list   --files src/OrderPage.php          one file, mechanical, verifiable
     python route.py --job repo-read --tokens 400000                 "find every caller of X across the repo"
@@ -14,15 +14,16 @@ unverifiable is not cheap - it is a defect the main model pays for later. So:
 
   job shape                         first choice                 fallback chain (on unavailable or FAIL)
   long non-AI step                  detached process (no model)  -
-  mechanical, one input, checkable  Ollama via run.py            Codex task (low)  -> Claude haiku -> main
-  repo-wide read, short answer      Codex task (low)             Claude Explore/haiku -> main
-  bounded 1-2 file edit             Claude sonnet subagent       main
-  draft / first-pass review         Ollama (review) + Codex      Claude sonnet -> main
-  second opinion on finished work   Codex audit (medium)         Claude sonnet reviewer (fresh context)
+  mechanical, one input, checkable  Ollama via run.py            Codex task (low) -> discovered subagent -> main
+  repo-wide read, short answer      Codex task (low)             discovered subagent -> main
+  bounded 1-2 file edit             discovered subagent          main
+  draft / first-pass review         Ollama (review) + Codex      discovered subagent -> main
+  second opinion on finished work   Codex audit (medium)         discovered reviewer (fresh context)
   judgment, design, security, grading, anything that ships       main model - never delegated
 
 Availability is live: Ollama models that fit the input and the free VRAM (run.py), Codex unless it is cooling
-down after a usage limit (codex_run.py), and the measured pass rate of each worker on this job type (ledger).
+down after a usage limit (codex_run.py), platform-advertised subagents, and the measured pass rate of each
+worker on this job type (ledger). Platform subagent model names are never assumed.
 A worker that keeps failing verification on a job type here is skipped for it automatically.
 """
 from __future__ import annotations
@@ -40,24 +41,24 @@ SKILL = Path(__file__).resolve().parent
 PY = "python " + str(SKILL).replace("\\", "/")
 
 JOBS = {
-    # job: (ollama task or None, codex effort or None, claude tier, needs judgment)
+    # job: (ollama task or None, codex effort or None, platform subagent role, needs judgment)
     "long-run":       (None,        None,     None,     False),
-    "list":           ("list",      "low",    "haiku",  False),
-    "extract":        ("extract",   "low",    "haiku",  False),
-    "count":          ("count",     "low",    "haiku",  False),
-    "format":         ("format",    "low",    "haiku",  False),
-    "classify":       ("classify",  "low",    "haiku",  False),
-    "summarize":      ("summarize", "low",    "haiku",  False),
-    "translate":      ("translate", "medium", "sonnet", False),
-    "repo-read":      (None,        "low",    "haiku",  False),
-    "edit":           (None,        None,     "sonnet", False),
-    "review":         ("review",    "medium", "sonnet", False),
-    "second-opinion": (None,        "medium", "sonnet", False),
+    "list":           ("list",      "low",    "read",   False),
+    "extract":        ("extract",   "low",    "read",   False),
+    "count":          ("count",     "low",    "read",   False),
+    "format":         ("format",    "low",    "read",   False),
+    "classify":       ("classify",  "low",    "read",   False),
+    "summarize":      ("summarize", "low",    "read",   False),
+    "translate":      ("translate", "medium", "write",  False),
+    "repo-read":      (None,        "low",    "explore", False),
+    "edit":           (None,        None,     "edit",    False),
+    "review":         ("review",    "medium", "review", False),
+    "second-opinion": (None,        "medium", "review", False),
     "judgment":       (None,        None,     None,     True),
 }
 MIN_PASS = 0.35   # a worker whose smoothed pass rate on this job is below this is skipped for it
 CODEX_MIN_INPUT = 20000   # every Codex call carries ~40-125k tokens of its own overhead (measured 2026-10-12):
-#                           worth it for a repo-wide read, wasteful for one small file a local model or haiku can do
+#                           worth it for a repo-wide read, wasteful for one small file a local model or subagent can do
 
 
 def tokens_of(files: list[str]) -> int:
@@ -97,7 +98,7 @@ def codex_choice(job: str) -> tuple[bool, str]:
 
 
 def decide(job: str, need: int, verifiable: bool) -> list[str]:
-    task, effort, tier, judgment = JOBS[job]
+    task, effort, agent_role, judgment = JOBS[job]
     plan: list[str] = []
     if judgment:
         return ["USE main model - judgment, design, security and grading are never delegated"]
@@ -126,11 +127,14 @@ def decide(job: str, need: int, verifiable: bool) -> list[str]:
                          "ask for path:line + a quoted line per item; codex_run checks every reference itself)")
         else:
             plan.append(f"  skip Codex: {why}")
-    if tier:
-        agent = {"haiku": "Agent(subagent_type: Explore, model: haiku)" if job == "repo-read" else "Agent(model: haiku)",
-                 "sonnet": "Agent(model: sonnet)"}[tier]
-        chain.append(f"Claude {tier} subagent: {agent} - tell it to return only the short answer, compressed, "
-                     f"items as path:line + quoted line; check with {PY}/refs.py reply.md")
+    if agent_role:
+        chain.append(
+            f"Platform {agent_role} subagent (discover first): inspect the current host's live worker/model "
+            "capability list and choose the cheapest compatible worker; if no authoritative compatibility "
+            "check exists, omit the model override and let the platform choose - never try remembered or "
+            "example model names. Return only the short answer, compressed, items as path:line + quoted line; "
+            f"check with {PY}/refs.py reply.md"
+        )
     chain.append("main model, inline")
     head, *rest = chain
     plan.insert(0, "USE " + head)
@@ -156,7 +160,8 @@ def show_status() -> int:
         print(f"Ollama : unavailable ({e})")
     ok, why = codex_run.status()
     print(f"Codex  : {'usable' if ok else 'unavailable'} - {why}")
-    print("Claude : subagents always available (haiku: read+compress, sonnet: bounded edit/review); main keeps judgment")
+    print("Platform: discover available subagents/models from the current host before delegation; if compatibility "
+          "cannot be checked, omit the model override; never guess a model name")
     return 0
 
 
