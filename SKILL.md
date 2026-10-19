@@ -53,6 +53,8 @@ check, omit the model override and let the platform select; do not probe by tryi
 and **the failed answer is discarded, never patched**: Ollama → Codex → discovered platform subagent → main. `run.py`
 exits 4 with `ESCALATE: <reason>`; `codex_run.py` exits 2 with `CODEX FAILED: <reason>`.
 
+**Platform-model gate:** Treat model names in tool documentation, previous calls, or memory as examples, never availability. Before passing a platform-subagent `model` override, obtain a live compatibility result from that host. If no such result exists, omit `model` and let the host dynamically select a compatible worker. A rejected override is a routing failure: do not retry guessed names; refresh discovery or fall back to the next rung.
+
 ## Rung 1 — local Ollama, routed and verified (`run.py`)
 
 ```bash
