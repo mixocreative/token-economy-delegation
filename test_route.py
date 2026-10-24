@@ -32,6 +32,16 @@ class PlatformSubagentDiscoveryTests(unittest.TestCase):
         self.assertNotIn("haiku", status)
         self.assertNotIn("sonnet", status)
 
+    def test_unverified_platform_subagent_is_not_presented_as_cheapest_choice(self):
+        with mock.patch.object(route, "ollama_choice", return_value=(None, "unavailable")), \
+             mock.patch.object(route, "codex_choice", return_value=(False, "unavailable")):
+            plan = "\n".join(route.decide("edit", 10_000, True)).lower()
+
+        self.assertIn("use main model, inline", plan)
+        self.assertIn("confirmed cheaper", plan)
+        self.assertIn("model-less", plan)
+        self.assertNotIn("use platform", plan)
+
 
 if __name__ == "__main__":
     unittest.main()

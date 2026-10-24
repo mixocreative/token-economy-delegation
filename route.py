@@ -16,7 +16,7 @@ unverifiable is not cheap - it is a defect the main model pays for later. So:
   long non-AI step                  detached process (no model)  -
   mechanical, one input, checkable  Ollama via run.py            Codex task (low) -> discovered subagent -> main
   repo-wide read, short answer      Codex task (low)             discovered subagent -> main
-  bounded 1-2 file edit             discovered subagent          main
+  bounded 1-2 file edit             main unless a cheaper platform worker is confirmed live
   draft / first-pass review         Ollama (review) + Codex      discovered subagent -> main
   second opinion on finished work   Codex audit (medium)         discovered reviewer (fresh context)
   judgment, design, security, grading, anything that ships       main model - never delegated
@@ -128,12 +128,12 @@ def decide(job: str, need: int, verifiable: bool) -> list[str]:
         else:
             plan.append(f"  skip Codex: {why}")
     if agent_role:
-        chain.append(
-            f"Platform {agent_role} subagent (discover first): inspect the current host's live worker/model "
-            "capability list and choose the cheapest compatible worker; if no authoritative compatibility "
-            "check exists, omit the model override and let the platform choose - never try remembered or "
-            "example model names. Return only the short answer, compressed, items as path:line + quoted line; "
-            f"check with {PY}/refs.py reply.md"
+        plan.append(
+            f"  optional platform {agent_role} subagent: discover live host compatibility first; use only a "
+            "confirmed cheaper compatible worker. If compatibility cannot be confirmed, omit the model "
+            "override only when parallelism or context isolation justifies a model-less subagent; do not "
+            "claim that it saves cost. Never guess model names or retry rejected overrides; verify cited "
+            f"references with {PY}/refs.py reply.md"
         )
     chain.append("main model, inline")
     head, *rest = chain
@@ -160,8 +160,9 @@ def show_status() -> int:
         print(f"Ollama : unavailable ({e})")
     ok, why = codex_run.status()
     print(f"Codex  : {'usable' if ok else 'unavailable'} - {why}")
-    print("Platform: discover available subagents/models from the current host before delegation; if compatibility "
-          "cannot be checked, omit the model override; never guess a model name")
+    print("Platform: compatibility and price unverified here; discover live host capabilities before delegation. "
+          "Use only a confirmed cheaper worker for token economy; model-less subagents are for justified "
+          "parallelism/context isolation, not presumed savings")
     return 0
 
 

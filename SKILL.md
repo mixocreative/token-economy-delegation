@@ -35,8 +35,10 @@ A worker that keeps failing verification for a job type is skipped for it automa
 
 **Discovery gate for every provider:** use live availability reported by the current host, router, or tool before
 selecting a worker. Never copy a model name from this file, an example, memory, or a previous session. For platform
-subagents, use an authoritative capability/status call when one exists. If the platform exposes no compatibility
-check, omit the model override and let the platform select; do not probe by trying a sequence of guessed names.
+subagents, use an authoritative capability/status call when one exists. If compatibility *and lower cost* cannot
+be confirmed, do not route to a subagent for token economy. A model-less subagent is still valid for justified
+parallelism or context isolation, but its cost is unknown; never present it as a cheaper fallback. Do not probe
+by trying guessed model names.
 
 ## The ladder
 
@@ -45,15 +47,16 @@ check, omit the model override and let the platform select; do not probe by tryi
 | 0 | **No model** — `detached.py` | test suite, build, smoke/walk scripts, installer or GPU runs, big downloads | ~0, survives the session |
 | 1 | **Local Ollama** — `run.py` (auto-routed) | one input, mechanical, **output checkable against the input**: enumerate, extract, count, reformat, classify, first-pass summary | prompt + verified answer |
 | 2 | **Codex** — `codex_run.py task` (effort low) | repo-wide reading with a short answer: callers, usages, "where is X handled"; Codex reads the files in its own context on its own quota | prompt + reply |
-| 2 | **Discovered platform subagent** | repo reads, bounded edits, or reviews when the host advertises a compatible lower-cost worker | prompt + compressed reply/diff |
+| 2 | **Confirmed cheaper platform subagent** | repo reads, bounded edits, or reviews only when this host verifies compatibility and lower cost | prompt + compressed reply/diff |
 | 2b | **Codex audit** — `codex_run.py audit` (effort medium) | a second opinion on finished work: review, plan consolidation, gap-finding; returns a VERDICT | prompt + verdict |
 | 3 | **Main model** | judgment, design, security, grading, anything that lands in a plan or register, code that ships | full |
 
 **Escalation is the quality guarantee.** Each rung's answer is checked; a failed check moves the job up,
-and **the failed answer is discarded, never patched**: Ollama → Codex → discovered platform subagent → main. `run.py`
+and **the failed answer is discarded, never patched**: Ollama → Codex → confirmed cheaper platform subagent
+(if any) → main. `run.py`
 exits 4 with `ESCALATE: <reason>`; `codex_run.py` exits 2 with `CODEX FAILED: <reason>`.
 
-**Platform-model gate:** Treat model names in tool documentation, previous calls, or memory as examples, never availability. Before passing a platform-subagent `model` override, obtain a live compatibility result from that host. If no such result exists, omit `model` and let the host dynamically select a compatible worker. A rejected override is a routing failure: do not retry guessed names; refresh discovery or fall back to the next rung.
+**Platform-model gate:** Treat model names in tool documentation, previous calls, or memory as examples, never availability. Before passing a platform-subagent `model` override, obtain a live compatibility result from that host. If no such result exists, skip the subagent for token economy. If there is a separate reason to delegate (parallelism or context isolation), omit `model` and accept that the platform chooses an unknown-cost worker. A rejected override is a routing failure: do not retry guessed names; refresh discovery or fall back to the next rung.
 
 ## Rung 1 — local Ollama, routed and verified (`run.py`)
 
@@ -130,11 +133,11 @@ python <skill>/codex_run.py audit prompt.md reply.md --effort medium   # second 
 
 ## Rung 2 — platform subagents
 
-Inspect the current platform's advertised workers and model compatibility immediately before delegating. Choose
-the cheapest compatible worker for the bounded role (read/explore, edit, or review). Do not name a model from
-memory or from documentation examples. If there is no authoritative compatibility check, omit the model override
-and let the platform choose rather than spending calls on guessed names. Tell the subagent the exact answer shape
-and request only the compressed result.
+Inspect the current platform's advertised workers, compatibility, and cost immediately before delegating.
+Choose the cheapest *confirmed compatible* worker for a bounded read/explore, edit, or review. If no cheaper
+worker can be confirmed, stay with local Ollama/Codex/main for economy. A model-less subagent may still be useful
+for parallelism or context isolation; omit the override, state that its cost is unknown, and do not call it an
+economy choice. Never try guessed model names or retry a rejected override. Request only a compressed result.
 
 ## Rules that hold on every rung
 
@@ -185,7 +188,8 @@ cooling down: noisy and slow (2026-10-08: 1 real of 8), never a verdict. Its mod
 |---|---|
 | Reading a 2000-line file in the main context to find twelve lines | `route.py --job list --files …`, then the command it prints |
 | Hard-coding a model name from memory | `run.py --discover`; let `--model auto` route |
-| Hard-coding a platform subagent model | Query the host's live capabilities; if that cannot verify compatibility, omit the model override |
+| Hard-coding a platform subagent model | Query live capabilities; if compatibility and lower cost cannot be verified, skip it for economy |
+| Calling an unverified default subagent "cheap" | Model-less delegation has unknown cost; use only for a separate parallelism/context-isolation benefit |
 | Asking a cheap worker "is this a defect?" | ask for the list; judge it on rung 3 |
 | Trusting a count | `--task count --count-regex` checks it; else grep the same thing |
 | Trusting a delegated `path:line` | `refs.py` - right names with wrong lines is the cheap tier's typical miss |
