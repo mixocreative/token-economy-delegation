@@ -58,7 +58,7 @@ exits 4 with `ESCALATE: <reason>`; `codex_run.py` exits 2 with `CODEX FAILED: <r
 
 **Platform-model gate:** Treat model names in tool documentation, previous calls, or memory as examples, never availability. Before passing a platform-subagent `model` override, obtain a live compatibility result from that host. If no such result exists, skip the subagent for token economy. If there is a separate reason to delegate (parallelism or context isolation), omit `model` and accept that the platform chooses an unknown-cost worker. A rejected override is a routing failure: do not retry guessed names; refresh discovery or fall back to the next rung.
 
-## Rung 0.5 — ask the thing itself, before anyone reads anything
+## Rung 0.5 — ask, don't read
 
 Every rung above is about **who reads text for me**. A whole class of question is not answered by
 reading at all: *does this work, what does the operator see, what changed, do these two agree.* For
@@ -85,12 +85,35 @@ different objects. Asking the **camera** - the thing actually under test - was e
 decimal places and took one run. In order of trust: **the system's own state > its DOM > its
 pixels.** A pixel comparison is the last resort, and never between two implementations.
 
-**Relationship questions are not behaviour questions** and have their own named tool. Callers,
-callees, call chains, blast radius: ask the code graph the project names (in this house, CGC first,
-then graphify for architecture, and `graphify affected "<module>"` for the docs that move with a
-change). Do not pay rung-3 tokens to read your way to a call chain - and do not expect a graph to
-answer a behaviour question: no graph models a conditional render, an effect's declaration order or
-what a click does.
+### Relationship questions: ask the INDEX, not the files
+
+The other half of "ask, don't read". **Who calls this, what calls it, what breaks if I change it,
+which docs move with it** - these are answered by an index in one call, and by reading in many. A
+project that has a code graph has already paid to build it; reading your way to a call chain pays
+for it again, in the one context that is scarce.
+
+| Question | Ask | Why not grep |
+|---|---|---|
+| callers, callees, call chains, blast radius | **CGC** (`find_code`, `analyze_code_relationships`) | it models calls, params and props; grep models text. A prop destructured and never used is invisible to text |
+| what area is this, which files take part, how do two things connect | **graphify** `query` / `path` / `explain` | returns a SCOPED SUBGRAPH - usually far smaller than the report or the raw grep output |
+| **which docs must change with this module** | **`graphify affected "<module>"`** | the fastest way to honour "update every affected `.md`", and nothing else answers it at all |
+
+Three disciplines, or the index costs more than it saves:
+
+1. **Ask ONE of them.** Two answers to one question is not corroboration, it is twice the tokens and
+   a tie-break nobody owns.
+2. **Neither is authoritative - the code and the docs are.** An answer that disagrees with the
+   source means the index is STALE: rebuild it, never file a finding against the code.
+3. **It is not free.** A call plus a subgraph in context beats ten reads, and loses to one grep. A
+   question with a known address - a named symbol, a `file:line` from a handoff or a test failure, a
+   string you can match - goes straight to the file. The graph is a map, and a map is no help when
+   you have the address.
+
+**And no graph answers a behaviour question.** No index models a conditional render, an effect's
+declaration order, or what a click does; that is rung 0.5's first half, above. Measured 2026-11-17:
+of six faults found in a day, the graphs would have found NONE - a probe or a picture found every
+one - while the one step a graph would have won outright was the docs sweep, which was done from
+memory instead and silently missed an edit.
 
 ## Rung 1 — local Ollama, routed and verified (`run.py`)
 
