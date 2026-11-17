@@ -58,6 +58,40 @@ exits 4 with `ESCALATE: <reason>`; `codex_run.py` exits 2 with `CODEX FAILED: <r
 
 **Platform-model gate:** Treat model names in tool documentation, previous calls, or memory as examples, never availability. Before passing a platform-subagent `model` override, obtain a live compatibility result from that host. If no such result exists, skip the subagent for token economy. If there is a separate reason to delegate (parallelism or context isolation), omit `model` and accept that the platform chooses an unknown-cost worker. A rejected override is a routing failure: do not retry guessed names; refresh discovery or fall back to the next rung.
 
+## Rung 0.5 — ask the thing itself, before anyone reads anything
+
+Every rung above is about **who reads text for me**. A whole class of question is not answered by
+reading at all: *does this work, what does the operator see, what changed, do these two agree.* For
+those the cheapest worker is **the system under test**, and the second test of this skill gets a
+sibling:
+
+> *Would I accept this from a grep?* → delegate it.
+> ***Would I accept this from a guess?* → then write the probe first.**
+
+**A probe is cheaper than a theory, and the bill for a theory is paid twice** — once in the tokens
+spent reasoning and again in the run that proves it wrong. Measured 2026-11-17 on mixodental: three
+separate wrong readings (a camera out by 2x, a tip count read as a stale preview, a cursor colour
+read off a composite) each cost a cycle of reasoning plus a verification run, and each was settled
+in ONE run by a thirty-line script that asked the app. Write that script first.
+
+A probe is a throwaway: it lives in the scratchpad, it is not committed, and it answers one
+question. When the same question will be asked again, it earns a place in the repo (`npm run look`,
+2026-11-17, is one that did) - not before.
+
+**Pick an oracle that cannot lie to you.** Measure the thing under test, not a proxy that shares
+none of its guarantees. Same day: comparing two 3D renderers by *how much of the canvas is not the
+background* reported a 2x camera difference that did not exist, because their background grids are
+different objects. Asking the **camera** - the thing actually under test - was exact to three
+decimal places and took one run. In order of trust: **the system's own state > its DOM > its
+pixels.** A pixel comparison is the last resort, and never between two implementations.
+
+**Relationship questions are not behaviour questions** and have their own named tool. Callers,
+callees, call chains, blast radius: ask the code graph the project names (in this house, CGC first,
+then graphify for architecture, and `graphify affected "<module>"` for the docs that move with a
+change). Do not pay rung-3 tokens to read your way to a call chain - and do not expect a graph to
+answer a behaviour question: no graph models a conditional render, an effect's declaration order or
+what a click does.
+
 ## Rung 1 — local Ollama, routed and verified (`run.py`)
 
 ```bash
@@ -147,6 +181,11 @@ economy choice. Never try guessed model names or retry a rejected override. Requ
   pulling and removing models, and check `run.py --discover` afterwards - on a machine with a second listener on
   `127.0.0.1:11434` the CLI can talk to the wrong server (2026-10-12: `ollama rm` answered "not found" for a
   model the desktop app held).
+- **Waiting is free; asking whether it is done is not.** A background or detached run notifies when
+  it ends - `detached.py watch` is armed for exactly that. Each "is it finished yet" is a round trip
+  with output and buys nothing. Measured 2026-11-17: ~40 poll cycles across six browser-walk runs,
+  every one of them avoidable, and the single largest avoidable spend of that session. Start the
+  run, say what you will do with its result, and stop until it tells you.
 - **Verify before use.** `run.py` and `codex_run.py` check mechanically; a subagent's list of references goes
   through `python <skill>/refs.py reply.md` (exit 3 = a cited line does not hold what it claims). Otherwise the
   main model checks: a count against `grep -c`, a list spot-read (ten per cent), a summary against the source on the two
@@ -197,3 +236,7 @@ cooling down: noisy and slow (2026-10-08: 1 real of 8), never a verdict. Its mod
 | Sending Codex work while it is out of credit | `codex_run.py --status`; the router already skips it |
 | Delegating the write-up of a finding | findings, grades and plans are rung 3 |
 | Delegating a 5-line lookup | inline - a handoff costs more than the read |
+| Polling a background run | it notifies; `detached.py watch` arms it. Each check costs, waiting does not |
+| Reasoning about behaviour instead of probing it | rung 0.5 - write the thirty-line script that asks the system |
+| Comparing two implementations by their pixels | ask each one's own state; pixels share none of the guarantees |
+| Reading your way to a call chain | the project's code graph (CGC/graphify) answers relationships |
